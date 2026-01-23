@@ -57,10 +57,11 @@ def recibir_mensaje():
     return jsonify({"status": "success"}), 200
 
 def enviar_whatsapp(numero, texto):
-    url = f"https://graph.facebook.com/v21.0/{META_PHONE_ID}/messages"
+    url = f"https://graph.facebook.com/v24.0/{META_PHONE_ID}/messages"
     headers = {"Authorization": f"Bearer {META_TOKEN}", "Content-Type": "application/json"}
     data = {"messaging_product": "whatsapp", "to": numero, "type": "text", "text": {"body": texto}}
     requests.post(url, json=data, headers=headers)
 
 if __name__ == "__main__":
+
     app.run(port=5000)
