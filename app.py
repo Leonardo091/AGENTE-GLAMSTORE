@@ -3,6 +3,7 @@ import logging
 from flask import Flask, request, jsonify
 import requests
 import google.generativeai as genai
+from collections import deque
 
 # Configuración de logs
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +15,11 @@ VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
+
+# --- MEMORIA DE ELEFANTE ---
+# Cada número de teléfono tiene su propio historial. NO SE MEZCLAN.
+# maxlen=12 significa que recuerda los últimos 12 mensajes (bastante charla).
+MEMORIA_CHATS = {} 
 
 MEMORIA_TIENDA = "Cargando..."
 
@@ -43,9 +49,8 @@ model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        # Usamos la estrategia Lite que vimos que es ilimitada
-        logging.info("🚀 INICIANDO CEREBRO...")
-        model = genai.GenerativeModel('gemini-2.0-flash-lite') 
+        logging.info("🚀 INICIANDO CEREBRO PERSONALIZADO...")
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except:
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
@@ -59,26 +64,23 @@ def consultar_productos(busqueda):
     url = f"https://{tienda_url}/admin/api/2024-01/products.json"
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    # Truco: Si busca "perfume" (muy genérico), traemos cualquiera. 
-    # Si es específico, usamos el término.
     params = {"title": busqueda, "status": "active", "limit": 5}
-    if busqueda.lower() in ["perfume", "perfumes", "arabe", "arabes"]:
-         # Si es muy genérico, quitamos el filtro de título para traer los últimos agregados
+    if busqueda.lower() in ["perfume", "perfumes", "arabe", "arabes", "catalogo"]:
          params = {"status": "active", "limit": 5}
 
     try:
         r = requests.get(url, headers=headers, params=params)
         if r.status_code == 200:
             prods = r.json().get("products", [])
-            if not prods: return "No encontré productos exactos, pero tenemos muchas opciones en la web."
+            if not prods: return "No encontré productos exactos, pero tenemos más en la web."
             
-            txt = "📦 ESTO ENCONTRÉ EN BODEGA:\n"
+            txt = "📦 OPCIONES DISPONIBLES:\n"
             for p in prods:
                 v = p['variants'][0]
                 price = int(float(v['price']))
-                txt += f"▪️ {p['title']} ➡️ ${price:,.0f}\n"
+                txt += f"🔹 {p['title']} a ${price:,.0f}\n"
             return txt
-    except: return "Error buscando en bodega."
+    except: return "Error buscando."
     return ""
 
 def crear_link_pago(nombre_producto):
@@ -93,7 +95,7 @@ def crear_link_pago(nombre_producto):
         r_search = requests.get(url_search, headers=headers, params=params)
         products = r_search.json().get("products", [])
         
-        if not products: return f"No encontré '{nombre_producto}' para crear el pedido."
+        if not products: return f"No encontré '{nombre_producto}' para generar link."
             
         variant_id = products[0]['variants'][0]['id']
         product_title = products[0]['title']
@@ -111,16 +113,15 @@ def crear_link_pago(nombre_producto):
         
         if r_create.status_code == 201:
             data = r_create.json().get("draft_order", {})
-            numero = data.get("name", "#Draft")
             url_pago = data.get("invoice_url")
-            return f"✅ PEDIDO {numero} LISTO\n💎 {product_title}\n💰 Valor: ${price:,.0f}\n👇 PAGAR AQUÍ:\n{url_pago}"
+            return f"✅ ¡Listo! Aquí está el link para el {product_title} (${price:,.0f}):\n👉 {url_pago}"
         else:
-            return "Error al generar el link."
+            return "Error al crear link."
 
     except Exception as e:
         return f"Error técnico: {e}"
 
-# --- 5. WEBHOOK INTELIGENTE ---
+# --- 5. WEBHOOK PERSONALIZADO ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -130,39 +131,52 @@ def recibir_mensajes():
         value = changes["value"]
 
         if "messages" in value:
+            # DATOS DEL CLIENTE
             mensaje = value["messages"][0]
             numero = mensaje["from"]
             texto = mensaje["text"]["body"]
             
-            logging.info(f"📩 MENSAJE: {texto}")
+            # INTENTAMOS SACAR EL NOMBRE DEL PERFIL DE WHATSAPP
+            nombre_cliente = "Cliente"
+            try:
+                contactos = value.get("contacts", [])
+                if contactos:
+                    nombre_cliente = contactos[0]["profile"]["name"]
+            except:
+                nombre_cliente = "Cliente"
+
+            logging.info(f"📩 MENSAJE DE {nombre_cliente} ({numero}): {texto}")
+
+            # 1. GESTIÓN DE MEMORIA (AISLADA POR NÚMERO)
+            if numero not in MEMORIA_CHATS:
+                MEMORIA_CHATS[numero] = deque(maxlen=12) # Recuerda los últimos 12 mensajes
+            
+            historial = list(MEMORIA_CHATS[numero])
+            texto_historial = "\n".join([f"- {h['rol']}: {h['txt']}" for h in historial])
 
             if model:
-                # 1. DETECTOR MEJORADO (CORRIGE ORTOGRAFÍA)
+                # 2. DETECCIÓN INTELIGENTE
                 prompt_det = f"""
-                Analiza el mensaje: "{texto}"
+                HISTORIAL CON {nombre_cliente}:
+                {texto_historial}
                 
-                Tu tarea es identificar qué busca el usuario en Shopify.
+                MENSAJE ACTUAL: "{texto}"
                 
-                REGLAS:
-                1. Si escribe mal una marca, CORRÍGELA (Ej: "Mason" -> "Maison").
-                2. Si dice "muestrame uno" o "cuales tienes", asume que quiere ver "perfumes".
-                3. Si pide comprar, usa VENDER.
-                4. Si pide ver/precio/info, usa BUSCAR.
+                TAREA:
+                1. Identifica qué quiere {nombre_cliente}.
+                2. Si dice "quiero ese", mira el historial para saber cuál es "ese".
                 
-                Responde SOLO el formato: ACCIÓN: PRODUCTO
-                Ejemplos:
-                - "tienes mason?" -> BUSCAR: Maison Alhambra
-                - "quiero el asad" -> VENDER: Asad
-                - "cuales hay?" -> BUSCAR: perfumes
-                - "hola" -> NULL
+                RESPONDE SOLO:
+                - VENDER: [Producto]
+                - BUSCAR: [Producto]
+                - CHARLA
                 """
                 
                 try:
                     decision_raw = model.generate_content(prompt_det).text.strip()
-                    # Limpieza extra por si Gemini se pone hablador
-                    decision = decision_raw.split("\n")[0] 
-                    logging.info(f"🧠 INTENCIÓN CORREGIDA: {decision}")
-                except: decision = "NULL"
+                    decision = decision_raw.split("\n")[0]
+                    logging.info(f"🧠 INTENCIÓN ({nombre_cliente}): {decision}")
+                except: decision = "CHARLA"
                 
                 info_extra = ""
                 producto_buscado = ""
@@ -176,29 +190,37 @@ def recibir_mensajes():
                 else:
                     info_extra = MEMORIA_TIENDA
 
-                # 2. RESPUESTA DE VENDEDOR (NO DE PÁGINA WEB)
+                # 3. RESPUESTA PERSONALIZADA
                 prompt_final = f"""
-                Eres el vendedor estrella de Glamstore Chile.
+                Eres "GlamBot", asistente de Glamstore Chile.
+                Estás hablando con: {nombre_cliente}.
                 
-                CONTEXTO:
-                Cliente dijo: "{texto}"
-                Intención detectada: "{decision}"
-                Información del sistema:
-                {info_extra}
+                HISTORIAL PREVIO:
+                {texto_historial}
                 
-                INSTRUCCIONES:
-                1. Si el sistema trajo una lista de productos ("ESTO ENCONTRÉ..."), ¡NOMBRALOS!
-                   No digas "revisa la web". Di: "Mira, tengo el X, el Y y el Z".
-                2. Si el cliente buscó algo mal escrito (ej: Mason), asume que quería decir lo correcto y ofrécele lo que encontraste.
-                3. Si el sistema dice "No encontré productos exactos", ofrece ayuda o sugiere marcas populares (Lattafa, Maison).
-                4. Sé corto, simpático y usa emojis.
+                SITUACIÓN ACTUAL:
+                {nombre_cliente} dice: "{texto}"
+                Info Sistema: {info_extra}
+                
+                INSTRUCCIONES CLAVE:
+                1. PERSONALIZA: Usa el nombre "{nombre_cliente}" si es natural hacerlo.
+                2. MEMORIA: Si antes hablaron de un perfume (ej: Yara), y ahora pregunta "¿cuánto vale?", asume que habla del Yara.
+                3. NO REPITAS SALUDOS: Si ya se saludaron en el historial, responde directo.
+                4. VENTA: Si hay link de pago, entrégalo con entusiasmo.
                 """
                 
                 try:
                     res = model.generate_content(prompt_final)
-                    enviar_whatsapp(numero, res.text)
-                except:
-                    enviar_whatsapp(numero, "¡Ups! Me marié un poco. ¿Me repites el nombre del perfume?")
+                    respuesta = res.text
+                    
+                    # Guardamos en la memoria DE ESTE NÚMERO
+                    MEMORIA_CHATS[numero].append({"rol": nombre_cliente, "txt": texto})
+                    MEMORIA_CHATS[numero].append({"rol": "Bot", "txt": respuesta})
+                    
+                    enviar_whatsapp(numero, respuesta)
+                except Exception as e:
+                    logging.error(f"❌ ERROR RESPUESTA: {e}")
+                    enviar_whatsapp(numero, "Dame un segundito...")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
