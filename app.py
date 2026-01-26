@@ -38,53 +38,19 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (ESTRATEGIA "LITE" ILIMITADA) ---
+# --- 3. CONFIGURACIÓN GEMINI (MODO LITE) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🚀 BUSCANDO MODELOS ILIMITADOS (LITE)...")
-        
-        # LISTA MAESTRA BASADA EN TU FOTO:
-        # Prioridad 1: Los modelos "Lite" que dicen "Ilimitado" en tu panel
-        prioridad = [
-            'models/gemini-2.0-flash-lite',   # EL ELEGIDO (Ilimitado según foto)
-            'models/gemini-2.5-flash-lite',   # La alternativa moderna
-            'models/gemini-1.5-flash',        # El clásico (si aparece)
-            'models/gemini-flash-1.5'         
-        ]
-        
-        # Le preguntamos a Google qué tienes habilitado realmente
-        mis_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        modelo_elegido = None
-        
-        # 1. Buscamos uno de la lista de prioridad
-        for p in prioridad:
-            if p in mis_modelos:
-                modelo_elegido = p
-                break
-        
-        # 2. Si no, buscamos cualquiera que tenga "lite" en el nombre (Plan B)
-        if not modelo_elegido:
-            for m in mis_modelos:
-                if "lite" in m:
-                    modelo_elegido = m
-                    break
-
-        if modelo_elegido:
-            logging.info(f"💎 CEREBRO ILIMITADO ACTIVADO: {modelo_elegido}")
-            model = genai.GenerativeModel(modelo_elegido)
-        else:
-            # Último recurso: el primero de la lista que no sea experimental
-            if mis_modelos:
-                modelo_elegido = mis_modelos[0]
-                logging.warning(f"⚠️ Usando modelo por defecto: {modelo_elegido}")
-                model = genai.GenerativeModel(modelo_elegido)
-
-    except Exception as e:
-        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
-        model = None
+        # Usamos la estrategia Lite que vimos que es ilimitada
+        logging.info("🚀 INICIANDO CEREBRO...")
+        model = genai.GenerativeModel('gemini-2.0-flash-lite') 
+    except:
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+        except:
+            model = None
 
 # --- 4. FUNCIONES DE TIENDA ---
 def consultar_productos(busqueda):
@@ -92,22 +58,31 @@ def consultar_productos(busqueda):
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     url = f"https://{tienda_url}/admin/api/2024-01/products.json"
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
-    params = {"title": busqueda, "status": "active", "limit": 4}
+    
+    # Truco: Si busca "perfume" (muy genérico), traemos cualquiera. 
+    # Si es específico, usamos el término.
+    params = {"title": busqueda, "status": "active", "limit": 5}
+    if busqueda.lower() in ["perfume", "perfumes", "arabe", "arabes"]:
+         # Si es muy genérico, quitamos el filtro de título para traer los últimos agregados
+         params = {"status": "active", "limit": 5}
+
     try:
         r = requests.get(url, headers=headers, params=params)
         if r.status_code == 200:
             prods = r.json().get("products", [])
-            if not prods: return "No encontré productos con ese nombre."
-            txt = "📦 DISPONIBLE:\n"
+            if not prods: return "No encontré productos exactos, pero tenemos muchas opciones en la web."
+            
+            txt = "📦 ESTO ENCONTRÉ EN BODEGA:\n"
             for p in prods:
                 v = p['variants'][0]
-                txt += f"- {p['title']} | ${v['price']}\n"
+                price = int(float(v['price']))
+                txt += f"▪️ {p['title']} ➡️ ${price:,.0f}\n"
             return txt
-    except: return "Error buscando."
+    except: return "Error buscando en bodega."
     return ""
 
 def crear_link_pago(nombre_producto):
-    if not SHOPIFY_TOKEN: return "Error de credenciales."
+    if not SHOPIFY_TOKEN: return "Error credenciales."
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
 
@@ -122,6 +97,7 @@ def crear_link_pago(nombre_producto):
             
         variant_id = products[0]['variants'][0]['id']
         product_title = products[0]['title']
+        price = int(float(products[0]['variants'][0]['price']))
 
         url_create = f"https://{tienda_url}/admin/api/2024-01/draft_orders.json"
         payload = {
@@ -137,15 +113,14 @@ def crear_link_pago(nombre_producto):
             data = r_create.json().get("draft_order", {})
             numero = data.get("name", "#Draft")
             url_pago = data.get("invoice_url")
-            total = float(data.get("total_price", 0))
-            return f"✅ PEDIDO {numero} GENERADO\nProducto: {product_title}\nTotal: ${total:,.0f}\nLINK PAGO: {url_pago}"
+            return f"✅ PEDIDO {numero} LISTO\n💎 {product_title}\n💰 Valor: ${price:,.0f}\n👇 PAGAR AQUÍ:\n{url_pago}"
         else:
-            return f"Error creando pedido: {r_create.status_code}"
+            return "Error al generar el link."
 
     except Exception as e:
         return f"Error técnico: {e}"
 
-# --- 5. WEBHOOK ---
+# --- 5. WEBHOOK INTELIGENTE ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -162,44 +137,68 @@ def recibir_mensajes():
             logging.info(f"📩 MENSAJE: {texto}")
 
             if model:
-                # Detector de intención
+                # 1. DETECTOR MEJORADO (CORRIGE ORTOGRAFÍA)
                 prompt_det = f"""
-                Analiza: "{texto}"
-                Responde SOLO:
-                - VENDER: [Producto] (Si quiere comprar/link/pedido)
-                - BUSCAR: [Producto] (Si pide precio/info)
-                - NULL (Saludos/Otros)
+                Analiza el mensaje: "{texto}"
+                
+                Tu tarea es identificar qué busca el usuario en Shopify.
+                
+                REGLAS:
+                1. Si escribe mal una marca, CORRÍGELA (Ej: "Mason" -> "Maison").
+                2. Si dice "muestrame uno" o "cuales tienes", asume que quiere ver "perfumes".
+                3. Si pide comprar, usa VENDER.
+                4. Si pide ver/precio/info, usa BUSCAR.
+                
+                Responde SOLO el formato: ACCIÓN: PRODUCTO
+                Ejemplos:
+                - "tienes mason?" -> BUSCAR: Maison Alhambra
+                - "quiero el asad" -> VENDER: Asad
+                - "cuales hay?" -> BUSCAR: perfumes
+                - "hola" -> NULL
                 """
+                
                 try:
-                    decision = model.generate_content(prompt_det).text.strip()
-                    logging.info(f"🧠 INTENCIÓN: {decision}")
+                    decision_raw = model.generate_content(prompt_det).text.strip()
+                    # Limpieza extra por si Gemini se pone hablador
+                    decision = decision_raw.split("\n")[0] 
+                    logging.info(f"🧠 INTENCIÓN CORREGIDA: {decision}")
                 except: decision = "NULL"
                 
                 info_extra = ""
-                if decision.startswith("VENDER:"):
-                    info_extra = crear_link_pago(decision.replace("VENDER:", "").strip())
-                elif decision.startswith("BUSCAR:"):
-                    info_extra = consultar_productos(decision.replace("BUSCAR:", "").strip())
+                producto_buscado = ""
+                
+                if "VENDER:" in decision:
+                    producto_buscado = decision.split("VENDER:")[1].strip()
+                    info_extra = crear_link_pago(producto_buscado)
+                elif "BUSCAR:" in decision:
+                    producto_buscado = decision.split("BUSCAR:")[1].strip()
+                    info_extra = consultar_productos(producto_buscado)
                 else:
                     info_extra = MEMORIA_TIENDA
 
+                # 2. RESPUESTA DE VENDEDOR (NO DE PÁGINA WEB)
                 prompt_final = f"""
-                Eres el equipo de Glamstore Chile.
-                INFO DEL SISTEMA: {info_extra}
-                CLIENTE DIJO: "{texto}"
+                Eres el vendedor estrella de Glamstore Chile.
                 
-                Instrucciones:
-                - Si hay un LINK DE PAGO, entrégalo claro.
-                - Si es info de producto, dásela.
-                - Sé amable y breve.
+                CONTEXTO:
+                Cliente dijo: "{texto}"
+                Intención detectada: "{decision}"
+                Información del sistema:
+                {info_extra}
+                
+                INSTRUCCIONES:
+                1. Si el sistema trajo una lista de productos ("ESTO ENCONTRÉ..."), ¡NOMBRALOS!
+                   No digas "revisa la web". Di: "Mira, tengo el X, el Y y el Z".
+                2. Si el cliente buscó algo mal escrito (ej: Mason), asume que quería decir lo correcto y ofrécele lo que encontraste.
+                3. Si el sistema dice "No encontré productos exactos", ofrece ayuda o sugiere marcas populares (Lattafa, Maison).
+                4. Sé corto, simpático y usa emojis.
                 """
                 
                 try:
                     res = model.generate_content(prompt_final)
                     enviar_whatsapp(numero, res.text)
-                except Exception as e:
-                    logging.error(f"❌ ERROR GEMINI RESPUESTA: {e}")
-                    enviar_whatsapp(numero, "Dame un momento, estoy reiniciando...")
+                except:
+                    enviar_whatsapp(numero, "¡Ups! Me marié un poco. ¿Me repites el nombre del perfume?")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
