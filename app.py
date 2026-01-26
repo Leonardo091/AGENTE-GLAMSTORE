@@ -38,39 +38,40 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (FILTRO ANTI-2.5) ---
+# --- 3. CONFIGURACIÓN GEMINI (MODO PRO - SIN LÍMITES) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🔍 BUSCANDO MODELO SEGURO...")
+        logging.info("🚀 ACTIVANDO MODO PRO (Buscando gemini-2.0)...")
         
-        # 1. Pedimos la lista de modelos disponibles en TU cuenta
-        todos_los_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # LISTA DE PRIORIDAD: Del más potente al más básico
+        # Ahora que pagas, priorizamos el 2.0 que es ilimitado y rápido
+        prioridad = [
+            'models/gemini-2.0-flash',       # EL MEJOR (Ilimitado según tu foto)
+            'models/gemini-2.5-flash',       # Muy bueno (10k mensajes)
+            'models/gemini-1.5-flash',       # El clásico confiable
+            'models/gemini-pro'
+        ]
         
-        # 2. FILTRO DE SEGURIDAD: Quitamos cualquiera que diga "2.5" (porque te bloquea)
-        modelos_seguros = [m for m in todos_los_modelos if "2.5" not in m]
+        # Obtenemos tu lista real
+        mis_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        modelo_final = None
-        
-        # 3. Buscamos el mejor candidato entre los seguros
-        # Prioridad 1: Alguno que sea "flash" (rápido y gratis)
-        for m in modelos_seguros:
-            if "flash" in m:
-                modelo_final = m
+        modelo_elegido = None
+        for p in prioridad:
+            if p in mis_modelos:
+                modelo_elegido = p
                 break
         
-        # Prioridad 2: Si no hay flash, usamos cualquiera seguro (ej: pro)
-        if not modelo_final and modelos_seguros:
-            modelo_final = modelos_seguros[0]
-            
-        if modelo_final:
-            logging.info(f"✅ CEREBRO ELEGIDO: {modelo_final}")
-            model = genai.GenerativeModel(modelo_final)
+        # Si no encuentra los top, usa el primero que haya
+        if not modelo_elegido and mis_modelos:
+            modelo_elegido = mis_modelos[0]
+
+        if modelo_elegido:
+            logging.info(f"💎 CEREBRO DE LUJO ACTIVADO: {modelo_elegido}")
+            model = genai.GenerativeModel(modelo_elegido)
         else:
-            logging.error("❌ NO SE ENCONTRÓ NINGÚN MODELO SEGURO.")
-            # Intento de emergencia
-            model = genai.GenerativeModel('gemini-pro')
+            logging.error("❌ NO SE ENCONTRÓ MODELO (Improbable con tu cuenta nueva)")
 
     except Exception as e:
         logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
