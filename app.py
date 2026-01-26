@@ -17,7 +17,7 @@ API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY") # <-- TOMAMOS LA LLAVE DE REND
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     # Usamos el modelo rápido y bueno para chat
-    model = genai.GenerativeModel('gemini-1.5-flash') 
+    model = genai.GenerativeModel('gemini-pro')
 else:
     logging.error("¡FALTA LA GEMINI_API_KEY EN RENDER!")
 
@@ -101,3 +101,4 @@ def enviar_whatsapp(numero, texto):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
