@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 import requests
 import google.generativeai as genai
 
-# Configuración básica de logs
+# Configuración básica
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
@@ -13,32 +13,17 @@ TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
-# 2. CONFIGURAMOS GEMINI Y DIAGNÓSTICO
+# 2. CONFIGURAMOS GEMINI
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     
-    # --- BLOQUE DE DIAGNÓSTICO (Para ver qué cerebros tienes) ---
-    try:
-        logging.info("🔍 DIAGNÓSTICO: Buscando modelos disponibles en tu llave...")
-        modelos_disponibles = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                modelos_disponibles.append(m.name)
-                logging.info(f"🧠 CEREBRO ENCONTRADO: {m.name}")
-        
-        if not modelos_disponibles:
-            logging.error("❌ ALERTA: Tu llave es válida, pero NO TIENE modelos activados. Crea una nueva en un proyecto nuevo.")
-    except Exception as e:
-        logging.error(f"❌ ERROR CRÍTICO al listar modelos: {e}")
-    # -----------------------------------------------------------
-
-    # Intentamos usar el modelo Flash (es el más rápido y actual)
-    # Si falla, miraremos los logs del diagnóstico para cambiar este nombre
-    model = genai.GenerativeModel('gemini-1.5-flash') 
+    # ¡AQUÍ ESTÁ EL CAMBIO! Usamos el modelo que apareció en tu lista
+    # gemini-2.0-flash es rapidísimo y potente
+    model = genai.GenerativeModel('gemini-2.0-flash') 
 else:
     logging.error("¡FALTA LA GEMINI_API_KEY EN RENDER!")
 
-# 3. RUTA PARA VERIFICACIÓN (El saludo con Meta)
+# 3. RUTA PARA VERIFICACIÓN
 @app.route("/webhook", methods=["GET"])
 def verificar_token():
     mode = request.args.get("hub.mode")
@@ -51,7 +36,7 @@ def verificar_token():
     else:
         return "Error de verificación", 403
 
-# 4. RUTA PARA RECIBIR MENSAJES (El Oído)
+# 4. RUTA PARA RECIBIR MENSAJES
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -60,39 +45,35 @@ def recibir_mensajes():
         changes = entry["changes"][0]
         value = changes["value"]
 
-        # Verificamos si es un mensaje real (y no un "visto")
         if "messages" in value:
             mensaje = value["messages"][0]
-            numero = mensaje["from"]  # Quien envía
-            texto_usuario = mensaje["text"]["body"]  # Qué dijo
+            numero = mensaje["from"]
+            texto_usuario = mensaje["text"]["body"]
             
             logging.info(f"📩 MENSAJE DE {numero}: {texto_usuario}")
 
-            # --- AQUÍ OCURRE LA MAGIA DE GEMINI ---
+            # --- MAGIA GEMINI ---
             try:
-                # Le preguntamos a Gemini
+                # Le preguntamos al modelo 2.0
                 response = model.generate_content(texto_usuario)
                 respuesta_gemini = response.text
-                logging.info(f"🤖 GEMINI RESPONDE: {respuesta_gemini}")
+                logging.info(f"🤖 GEMINI 2.0 RESPONDE: {respuesta_gemini}")
                 
-                # Enviamos la respuesta de Gemini a WhatsApp
                 enviar_whatsapp(numero, respuesta_gemini)
                 
             except Exception as e:
                 logging.error(f"❌ ERROR CEREBRAL: {str(e)}")
-                # Mensaje de error amigable para ti mientras probamos
-                enviar_whatsapp(numero, "Estoy teniendo problemas con mi cerebro (API Key). Revisa los logs de Render.")
-            # ---------------------------------------
+                enviar_whatsapp(numero, "Tuve un pequeño error mental, pero sigo vivo. Intenta de nuevo.")
+            # --------------------
 
         return jsonify({"status": "recibido"}), 200
 
     except Exception as e:
-        # Si llega algo que no es mensaje (como un status), lo ignoramos sin error
         return jsonify({"status": "evento_ignorado"}), 200
 
-# 5. FUNCIÓN PARA ENVIAR (La Boca)
+# 5. FUNCIÓN PARA ENVIAR
 def enviar_whatsapp(numero, texto):
-    # Usamos tu ID de teléfono confirmado
+    # Tu ID de teléfono confirmado
     url = "https://graph.facebook.com/v21.0/939839529214459/messages"
     
     headers = {
@@ -108,10 +89,8 @@ def enviar_whatsapp(numero, texto):
     }
 
     response = requests.post(url, headers=headers, json=data)
-    if response.status_code == 200:
-        logging.info("✅ MENSAJE ENVIADO")
-    else:
-        logging.error(f"❌ ERROR AL ENVIAR A WHATSAPP: {response.text}")
+    if response.status_code != 200:
+        logging.error(f"❌ ERROR AL ENVIAR: {response.text}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
