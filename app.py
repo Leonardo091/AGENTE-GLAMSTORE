@@ -8,9 +8,9 @@ import google.generativeai as genai
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- 1. CREDENCIALES (Tal cual tus fotos de Render) ---
+# --- 1. CREDENCIALES ---
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
-VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN") # Tu variable correcta
+VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
@@ -20,9 +20,7 @@ MEMORIA_TIENDA = "Cargando..."
 # --- 2. CARGA DE DATOS SHOPIFY ---
 def cargar_informacion_tienda():
     if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "⚠️ Faltan credenciales."
-    # Limpiamos la URL para evitar errores de tipeo
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("http://", "").replace("/", "")
-    
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     info = "DATOS GLAMSTORE:\n"
     try:
@@ -40,50 +38,52 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (ESTRATEGIA ANTI-429) ---
+# --- 3. CONFIGURACIÓN GEMINI (ESTRATEGIA "LITE" ILIMITADA) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🛡️ INICIANDO PROTOCOLO ESTABLE...")
+        logging.info("🚀 BUSCANDO MODELOS ILIMITADOS (LITE)...")
         
-        # LISTA SEGURA: Solo modelos que NO dan error 429
-        # Priorizamos el 1.5 Flash que es el caballito de batalla
+        # LISTA MAESTRA BASADA EN TU FOTO:
+        # Prioridad 1: Los modelos "Lite" que dicen "Ilimitado" en tu panel
         prioridad = [
-            'models/gemini-1.5-flash',        # Opción 1: El estándar
-            'models/gemini-1.5-flash-latest', # Opción 2: El actualizado
-            'models/gemini-1.5-flash-001',    # Opción 3: El específico
-            'models/gemini-pro'               # Opción 4: El clásico (lento pero seguro)
+            'models/gemini-2.0-flash-lite',   # EL ELEGIDO (Ilimitado según foto)
+            'models/gemini-2.5-flash-lite',   # La alternativa moderna
+            'models/gemini-1.5-flash',        # El clásico (si aparece)
+            'models/gemini-flash-1.5'         
         ]
         
-        # Obtenemos qué modelos tienes disponibles realmente
+        # Le preguntamos a Google qué tienes habilitado realmente
         mis_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
         modelo_elegido = None
         
-        # Buscamos el mejor de la lista segura
+        # 1. Buscamos uno de la lista de prioridad
         for p in prioridad:
             if p in mis_modelos:
                 modelo_elegido = p
                 break
         
-        # Si por alguna razón no está ninguno, usamos el primero que NO sea experimental
+        # 2. Si no, buscamos cualquiera que tenga "lite" en el nombre (Plan B)
         if not modelo_elegido:
             for m in mis_modelos:
-                if "2.0" not in m and "2.5" not in m: # Evitamos los problemáticos
+                if "lite" in m:
                     modelo_elegido = m
                     break
 
         if modelo_elegido:
-            logging.info(f"✅ CEREBRO ACTIVO: {modelo_elegido}")
+            logging.info(f"💎 CEREBRO ILIMITADO ACTIVADO: {modelo_elegido}")
             model = genai.GenerativeModel(modelo_elegido)
         else:
-            # Si todo falla, forzamos el estándar
-            logging.warning("⚠️ Forzando modelo estándar...")
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # Último recurso: el primero de la lista que no sea experimental
+            if mis_modelos:
+                modelo_elegido = mis_modelos[0]
+                logging.warning(f"⚠️ Usando modelo por defecto: {modelo_elegido}")
+                model = genai.GenerativeModel(modelo_elegido)
 
     except Exception as e:
-        logging.error(f"❌ ERROR GEMINI INIT: {e}")
+        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
         model = None
 
 # --- 4. FUNCIONES DE TIENDA ---
@@ -204,7 +204,7 @@ def recibir_mensajes():
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
 
-# VERIFICACIÓN (Usa tu variable META_VERIFY_TOKEN)
+# VERIFICACIÓN
 @app.route("/webhook", methods=["GET"])
 def verificar():
     verify_token_env = os.environ.get("META_VERIFY_TOKEN")
