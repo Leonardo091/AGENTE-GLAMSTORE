@@ -8,16 +8,15 @@ import google.generativeai as genai
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- 1. CREDENCIALES ---
+# --- 1. CREDENCIALES (Se cargan desde Render) ---
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
-
-# Credenciales de Shopify (Las nuevas)
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
-SHOPIFY_URL = os.environ.get("SHOPIFY_URL") # Ejemplo: glamstore.myshopify.com
+SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 
 # --- 2. CONFIGURACIÓN CEREBRO (AUTO-PILOTO) ---
+# Este bloque busca el mejor modelo disponible en tu cuenta automáticamente
 modelo_elegido = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
@@ -25,8 +24,8 @@ if API_KEY_GEMINI:
         logging.info("🔍 DETECTANDO CEREBRO AUTOMÁTICAMENTE...")
         modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # Lista de preferencia (del más rápido al más seguro)
-        favoritos = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-flash-latest']
+        # Preferencias: Flash (rápido) -> Pro (potente)
+        favoritos = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-flash-latest', 'models/gemini-pro']
         
         for fav in favoritos:
             if fav in modelos:
@@ -43,22 +42,23 @@ if API_KEY_GEMINI:
 # --- 3. FUNCIÓN: BUSCAR EN SHOPIFY ---
 def consultar_shopify(producto_busqueda):
     if not SHOPIFY_TOKEN or not SHOPIFY_URL:
-        return "Error: Faltan credenciales de Shopify en Render."
+        return "Error: Faltan credenciales de Shopify."
 
     logging.info(f"🛒 BUSCANDO EN SHOPIFY: {producto_busqueda}")
     
-    # Limpiamos la URL por si acaso
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
-    
     url = f"https://{tienda_url}/admin/api/2024-01/products.json"
+    
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_TOKEN,
         "Content-Type": "application/json"
     }
+    
+    # Aumentamos el límite a 5 para dar más opciones
     params = {
         "title": producto_busqueda,
         "status": "active",
-        "limit": 3 # Traemos máximo 3 coincidencias
+        "limit": 5 
     }
 
     try:
@@ -66,24 +66,22 @@ def consultar_shopify(producto_busqueda):
         if response.status_code == 200:
             productos = response.json().get("products", [])
             if not productos:
-                return "No encontré productos con ese nombre en la tienda."
+                return "No se encontraron coincidencias exactas en el catálogo."
             
-            # Formateamos la info para que Gemini la entienda
-            texto_info = "Encontré estos productos en el inventario:\n"
+            # Formateamos la info para que Gemini la lea clarito
+            texto_info = "📦 INVENTARIO ENCONTRADO:\n"
             for p in productos:
                 titulo = p['title']
-                # Sacamos precio y stock de la primera variante
                 variante = p['variants'][0] 
                 precio = variante['price']
                 stock = variante['inventory_quantity']
-                texto_info += f"- {titulo}: Precio ${precio} CLP | Stock: {stock} unidades\n"
+                # Le pasamos el ID o URL si quisieras después, por ahora solo info básica
+                texto_info += f"- {titulo} | Precio: ${precio} CLP | Disponibles: {stock}\n"
             
             return texto_info
         else:
-            logging.error(f"❌ ERROR SHOPIFY: {response.status_code} - {response.text}")
-            return "Error consultando la base de datos de la tienda."
+            return "Error consultando la base de datos."
     except Exception as e:
-        logging.error(f"❌ ERROR CONEXIÓN SHOPIFY: {e}")
         return "Error de conexión con la tienda."
 
 # --- 4. RUTA RECIBIR MENSAJES ---
@@ -103,12 +101,18 @@ def recibir_mensajes():
             logging.info(f"📩 MENSAJE DE {numero}: {texto_usuario}")
 
             if model:
-                # PASO 1: Le preguntamos a Gemini si hay que buscar un producto
-                # Usamos un prompt rápido para extraer el producto
+                # PASO 1: DETECTAR INTENCIÓN Y TÉRMINO DE BÚSQUEDA
+                # Aquí le enseñamos a entender "similares"
                 prompt_detector = f"""
-                Analiza la frase del cliente: "{texto_usuario}"
-                Si menciona un producto o categoría para comprar/cotizar, responde SOLO con el nombre clave del producto para buscarlo.
-                Si es un saludo o no pide producto, responde: NULL
+                Analiza el mensaje del cliente: "{texto_usuario}"
+                
+                Tu tarea es extraer UNA palabra clave para buscar en el inventario de Shopify.
+                1. Si pide un producto específico (ej: "Sauvage"), usa ese nombre.
+                2. Si pide "algo como X" o "similar a X", usa "X" como búsqueda (para encontrar inspiraciones).
+                3. Si pide una familia (ej: "algo dulce", "árabe"), usa esa palabra clave.
+                4. Si es solo saludo o charla, responde: NULL
+                
+                Responde SOLO con la palabra clave.
                 """
                 try:
                     res_detector = model.generate_content(prompt_detector)
@@ -117,25 +121,31 @@ def recibir_mensajes():
                     termino_busqueda = "NULL"
                 
                 info_tienda = ""
-                # PASO 2: Si hay producto, vamos a Shopify
+                # PASO 2: BUSCAR EN SHOPIFY (Si hay término)
                 if termino_busqueda != "NULL" and len(termino_busqueda) > 2:
                     info_tienda = consultar_shopify(termino_busqueda)
-                    logging.info(f"📦 DATOS SHOPIFY: {info_tienda}")
+                    logging.info(f"📦 INFO OBTENIDA: {info_tienda}")
 
-                # PASO 3: Generamos la respuesta final
+                # PASO 3: GENERAR RESPUESTA FINAL (NUEVA PERSONALIDAD)
                 prompt_final = f"""
-                Eres el vendedor experto de 'Glamstore Chile'. 
-                Actúa amable, chileno y servicial.
+                Actúa como el EQUIPO DE ATENCIÓN AL CLIENTE de "Glamstore Chile".
+                Tu tono debe ser: Profesional, amable, correcto y servicial.
                 
-                PREGUNTA DEL CLIENTE: "{texto_usuario}"
+                INSTRUCCIONES CLAVE:
+                - Habla en plural ("Nosotros", "Le recomendamos").
+                - NO uses jergas chilenas (como "cachai", "bacán"), habla un español neutro y educado.
+                - SIEMPRE entiende si el usuario usa jergas, pero tú responde formalmente.
+                - Sé conciso y directo.
                 
-                INFORMACIÓN DE INVENTARIO (Úsala si sirve):
+                CONTEXTO:
+                Mensaje del Cliente: "{texto_usuario}"
+                Datos del Inventario (Shopify):
                 {info_tienda}
                 
-                Instrucciones:
-                - Si hay info de inventario, DASELA al cliente (precios y stock).
-                - Si no hay stock, ofrece ayuda.
-                - Si es solo un saludo, saluda de vuelta.
+                DIRECTRICES DE RESPUESTA:
+                - Si hay inventario: Ofrece los productos con sus precios exactos.
+                - Si no hay stock o no se encontró: Ofrece buscar otra cosa amablemente.
+                - Si es un saludo: Preséntate como el equipo de Glamstore.
                 """
                 
                 res_final = model.generate_content(prompt_final)
@@ -144,7 +154,7 @@ def recibir_mensajes():
                 enviar_whatsapp(numero, respuesta)
 
             else:
-                enviar_whatsapp(numero, "Estoy reiniciando mis sistemas... intenta en 1 minuto.")
+                enviar_whatsapp(numero, "Estamos actualizando nuestros sistemas. Por favor intente en un momento.")
 
         return jsonify({"status": "ok"}), 200
     except:
