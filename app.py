@@ -8,9 +8,9 @@ import google.generativeai as genai
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- 1. CREDENCIALES ---
+# --- 1. CREDENCIALES (Tal cual tus fotos de Render) ---
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
-VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
+VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN") # Tu variable correcta
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
@@ -20,7 +20,9 @@ MEMORIA_TIENDA = "Cargando..."
 # --- 2. CARGA DE DATOS SHOPIFY ---
 def cargar_informacion_tienda():
     if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "⚠️ Faltan credenciales."
+    # Limpiamos la URL para evitar errores de tipeo
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("http://", "").replace("/", "")
+    
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     info = "DATOS GLAMSTORE:\n"
     try:
@@ -38,42 +40,50 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (PRIORIDAD ESTABILIDAD 1.5) ---
+# --- 3. CONFIGURACIÓN GEMINI (ESTRATEGIA ANTI-429) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🛡️ BUSCANDO MODELO ESTABLE...")
+        logging.info("🛡️ INICIANDO PROTOCOLO ESTABLE...")
         
-        # AQUÍ ESTÁ EL CAMBIO CLAVE:
-        # Ponemos el 1.5 Flash PRIMERO. Es el que nunca falla.
+        # LISTA SEGURA: Solo modelos que NO dan error 429
+        # Priorizamos el 1.5 Flash que es el caballito de batalla
         prioridad = [
-            'models/gemini-1.5-flash',       # EL HILUX (Estable, Rápido, Seguro)
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-flash-001',
-            'models/gemini-2.0-flash'        # Dejamos el experimental al final por si acaso
+            'models/gemini-1.5-flash',        # Opción 1: El estándar
+            'models/gemini-1.5-flash-latest', # Opción 2: El actualizado
+            'models/gemini-1.5-flash-001',    # Opción 3: El específico
+            'models/gemini-pro'               # Opción 4: El clásico (lento pero seguro)
         ]
         
+        # Obtenemos qué modelos tienes disponibles realmente
         mis_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
         modelo_elegido = None
+        
+        # Buscamos el mejor de la lista segura
         for p in prioridad:
             if p in mis_modelos:
                 modelo_elegido = p
                 break
         
-        # Si no, el primero que pille
-        if not modelo_elegido and mis_modelos:
-            modelo_elegido = mis_modelos[0]
+        # Si por alguna razón no está ninguno, usamos el primero que NO sea experimental
+        if not modelo_elegido:
+            for m in mis_modelos:
+                if "2.0" not in m and "2.5" not in m: # Evitamos los problemáticos
+                    modelo_elegido = m
+                    break
 
         if modelo_elegido:
             logging.info(f"✅ CEREBRO ACTIVO: {modelo_elegido}")
             model = genai.GenerativeModel(modelo_elegido)
         else:
-            logging.error("❌ NO SE ENCONTRÓ MODELO COMPATIBLE")
+            # Si todo falla, forzamos el estándar
+            logging.warning("⚠️ Forzando modelo estándar...")
+            model = genai.GenerativeModel('gemini-1.5-flash')
 
     except Exception as e:
-        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
+        logging.error(f"❌ ERROR GEMINI INIT: {e}")
         model = None
 
 # --- 4. FUNCIONES DE TIENDA ---
@@ -189,13 +199,12 @@ def recibir_mensajes():
                     enviar_whatsapp(numero, res.text)
                 except Exception as e:
                     logging.error(f"❌ ERROR GEMINI RESPUESTA: {e}")
-                    # En caso de emergencia, enviamos mensaje genérico
-                    enviar_whatsapp(numero, "Dame un segundo, estoy reiniciando sistemas...")
+                    enviar_whatsapp(numero, "Dame un momento, estoy reiniciando...")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
 
-# VERIFICACIÓN
+# VERIFICACIÓN (Usa tu variable META_VERIFY_TOKEN)
 @app.route("/webhook", methods=["GET"])
 def verificar():
     verify_token_env = os.environ.get("META_VERIFY_TOKEN")
