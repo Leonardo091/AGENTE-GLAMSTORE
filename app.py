@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 # --- 1. CREDENCIALES ---
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
-VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN") # Tu variable de Render
+VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
@@ -20,7 +20,6 @@ MEMORIA_TIENDA = "Cargando..."
 # --- 2. CARGA DE DATOS SHOPIFY ---
 def cargar_informacion_tienda():
     if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "⚠️ Faltan credenciales."
-    # Limpieza de URL
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("http://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     info = "DATOS GLAMSTORE:\n"
@@ -31,7 +30,7 @@ def cargar_informacion_tienda():
             info += f"Web: {shop.get('domain')}\nEmail: {shop.get('email')}\nMoneda: {shop.get('currency')}\n"
             logging.info(f"✅ CONECTADO A SHOPIFY: {tienda_url}")
         else:
-            logging.error(f"❌ ERROR SHOPIFY: {res.status_code} - Revisa la URL en Render")
+            logging.error(f"❌ ERROR SHOPIFY: {res.status_code}")
             info += "(Error conexión tienda)\n"
     except Exception as e:
         logging.error(f"❌ ERROR CRÍTICO: {e}")
@@ -39,48 +38,19 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (AUTO-PILOTO CON PRIORIDAD GRATUITA) ---
+# --- 3. CONFIGURACIÓN GEMINI (MANUAL Y FORZADA) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🔍 ESCANEANDO MODELOS DISPONIBLES...")
-        # Obtenemos todos los modelos de tu cuenta
-        modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # ESTA ES LA LISTA MAESTRA DE PRIORIDAD
-        # El código buscará en este orden exacto. Si encuentra el primero, se casa con ese.
-        orden_prioridad = [
-            'models/gemini-1.5-flash',        # EL REY (Rápido y Gratis)
-            'models/gemini-1.5-flash-001',    # Versión específica estable
-            'models/gemini-1.5-flash-latest', # Última versión flash
-            'models/gemini-1.0-pro',          # El clásico confiable
-            'models/gemini-pro'               # El abuelo
-        ]
-        
-        modelo_elegido = None
-        
-        # 1. Buscamos coincidencias en nuestra lista de prioridad
-        for candidato in orden_prioridad:
-            if candidato in modelos_disponibles:
-                modelo_elegido = candidato
-                break
-        
-        # 2. Si no encontramos ninguno de los favoritos, usamos el primero que aparezca (Plan Z)
-        # PERO filtramos para evitar el 2.5 si es posible
-        if not modelo_elegido and modelos_disponibles:
-            modelo_elegido = modelos_disponibles[0]
-
-        if modelo_elegido:
-            logging.info(f"🧠 CEREBRO SELECCIONADO: {modelo_elegido}")
-            model = genai.GenerativeModel(modelo_elegido)
-        else:
-            logging.error("❌ NO SE ENCONTRÓ NINGÚN MODELO COMPATIBLE")
-
-    except Exception as e:
-        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
-        # Intento desesperado final
+        # ¡AQUÍ ESTÁ EL CAMBIO!
+        # Nada de buscar listas. Le ponemos el nombre EXACTO del modelo gratuito robusto.
+        logging.info("🔒 FORZANDO MODELO: gemini-1.5-flash")
         model = genai.GenerativeModel('gemini-1.5-flash')
+        
+    except Exception as e:
+        logging.error(f"❌ ERROR GEMINI: {e}")
+        model = None
 
 # --- 4. FUNCIONES DE TIENDA ---
 def consultar_productos(busqueda):
@@ -194,8 +164,8 @@ def recibir_mensajes():
                     res = model.generate_content(prompt_final)
                     enviar_whatsapp(numero, res.text)
                 except Exception as e:
-                    logging.error(f"❌ ERROR AL GENERAR RESPUESTA: {e}")
-                    enviar_whatsapp(numero, "Tuve un problema momentáneo. ¿Me repites?")
+                    logging.error(f"❌ ERROR GEMINI RESPUESTA: {e}")
+                    enviar_whatsapp(numero, "Estoy reiniciando mis neuronas. Dame 1 minuto.")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
