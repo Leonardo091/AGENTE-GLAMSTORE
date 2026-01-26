@@ -19,12 +19,12 @@ SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 MI_PROPIA_URL = "https://agente-glamstore.onrender.com" 
 
-# --- 2. LA BIBLIA DE GLAMSTORE (TU VERDAD) ---
+# --- 2. LA VERDAD ABSOLUTA ---
 INFO_TIENDA = """
-NOMBRE: Glamstore Chile
-UBICACIÓN FÍSICA: Santo Domingo 240, Puente Alto (Interior Sandro's Collection).
-HORARIOS: Lunes-Viernes 10:00-17:30 | Sábados 10:00-14:30.
-WEB: www.glamstorechile.cl
+📍 UBICACIÓN: Santo Domingo 240, Puente Alto (Interior Sandro's Collection).
+⏰ HORARIOS: Lunes a Viernes 10:00-17:30 | Sábados 10:00-14:30.
+🚛 ENVÍOS: A todo Chile.
+🌐 WEB: www.glamstorechile.cl
 """
 
 # --- MEMORIA Y ROBOT ---
@@ -41,7 +41,7 @@ hilo.daemon = True
 hilo.start()
 
 @app.route("/")
-def home(): return "🤖 GLAMBOT v17 OK", 200
+def home(): return "🤖 GLAMBOT v18 LISTO", 200
 
 # --- 3. CONFIGURACIÓN GEMINI ---
 model = None
@@ -52,30 +52,29 @@ if API_KEY_GEMINI:
 
 # --- 4. FUNCIONES VENTAS ---
 def consultar_productos(busqueda):
-    if not SHOPIFY_TOKEN: return "Error técnico."
+    if not SHOPIFY_TOKEN: return ""
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    # Si es búsqueda general, traemos lo nuevo
     params = {"title": busqueda, "status": "active", "limit": 5}
-    if busqueda.lower() in ["todo", "catalogo", "perfumes", "perfume", "algo", "que tienes"]:
+    if busqueda.lower() in ["todo", "catalogo", "perfumes", "perfume", "algo", "que venden"]:
         params = {"status": "active", "limit": 6}
 
     try:
         r = requests.get(f"https://{tienda_url}/admin/api/2024-01/products.json", headers=headers, params=params)
         prods = r.json().get("products", [])
         
-        if not prods: return "NOT_FOUND" # Señal clave para el bot
+        if not prods: return "NO_HAY_STOCK" 
             
-        txt = "📦 DISPONIBLE:\n"
+        txt = "📦 ENCONTRÉ ESTO:\n"
         for p in prods:
             v = p['variants'][0]
             txt += f"✨ {p['title']} (${float(v['price']):,.0f})\n"
         return txt
-    except: return "ERROR_API"
+    except: return ""
 
 def crear_link_pago(nombre_producto):
-    if not SHOPIFY_TOKEN: return "Error credenciales."
+    if not SHOPIFY_TOKEN: return ""
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
@@ -83,15 +82,15 @@ def crear_link_pago(nombre_producto):
                      headers=headers, params={"title": nombre_producto, "status": "active", "limit": 1})
     products = r.json().get("products", [])
     
-    if not products: return "NOT_FOUND_LINK"
+    if not products: return "NO_ENCONTRE_PRODUCTO_EXACTO"
         
     v = products[0]['variants'][0]
     payload = {"draft_order": {"line_items": [{"variant_id": v['id'], "quantity": 1}]}}
     r2 = requests.post(f"https://{tienda_url}/admin/api/2024-01/draft_orders.json", headers=headers, json=payload)
     if r2.status_code == 201:
         data = r2.json().get("draft_order", {})
-        return f"✅ Link generado para {products[0]['title']} (${float(v['price']):,.0f}):\n👉 {data.get('invoice_url')}"
-    return "Error creando link."
+        return f"✅ Link: {data.get('invoice_url')}"
+    return ""
 
 # --- 5. WEBHOOK LÓGICO ---
 @app.route("/webhook", methods=["POST"])
@@ -104,7 +103,7 @@ def recibir_mensajes():
             msg = entry["messages"][0]
             numero = msg["from"]
             texto = msg["text"]["body"]
-            nombre = entry.get("contacts", [{}])[0].get("profile", {}).get("name", "Cliente")
+            nombre = entry.get("contacts", [{}])[0].get("profile", {}).get("name", "amig@")
 
             logging.info(f"📩 {nombre}: {texto}")
 
@@ -115,56 +114,64 @@ def recibir_mensajes():
             texto_historial = "\n".join([f"- {h['rol']}: {h['txt']}" for h in historial])
 
             if model:
-                # 1. Detector de Intención
-                # Ahora distingue entre BUSCAR PRODUCTO y PREGUNTAR UBICACIÓN
+                # PASO 1: Detector de Intención (SIMPLE)
                 prompt_det = f"""
-                Analiza: "{texto}"
-                Historial reciente: {texto_historial}
-                
-                Clasifica en UNA categoría:
-                - VENDER: [Nombre Producto] (Solo si quiere comprar/pagar)
-                - BUSCAR: [Nombre Producto] (Solo si pregunta por stock, precios, marcas, perfumes)
-                - INFO_TIENDA (Si pregunta ubicación, horario, envíos, o si es real)
-                - CHARLA (Saludos, gracias, otros)
+                Analiza el mensaje: "{texto}"
+                Responde UNA SOLA PALABRA:
+                - TIENDA (Si pregunta ubicación, horario, dónde están, envío)
+                - PRODUCTO (Si pregunta por stock, precio, catálogo, perfumes)
+                - COMPRAR (Si dice "quiero ese", "dame link")
+                - OTRO (Saludos, gracias, charla)
                 """
-                try: decision = model.generate_content(prompt_det).text.strip().split("\n")[0]
-                except: decision = "CHARLA"
+                try: decision = model.generate_content(prompt_det).text.strip().upper()
+                except: decision = "OTRO"
 
-                logging.info(f"🧠 INTENCIÓN: {decision}")
+                logging.info(f"🧠 CEREBRO DECIDIÓ: {decision}")
 
-                info_extra = ""
-                # SOLO buscamos en Shopify si la intención es de PRODUCTO
-                if "VENDER:" in decision: 
-                    info_extra = crear_link_pago(decision.split(":")[1])
-                elif "BUSCAR:" in decision: 
-                    info_extra = consultar_productos(decision.split(":")[1])
+                # PASO 2: Ejecutar Acción (LÓGICA BLINDADA)
+                info_sistema = ""
                 
-                # Definir saludo dinámicamente
-                instruccion_saludo = ""
-                if len(historial) == 0:
-                    instruccion_saludo = f"Saluda a {nombre} amablemente."
-                else:
-                    instruccion_saludo = "NO SALUDES (ya estamos hablando). Responde directo."
+                if "TIENDA" in decision:
+                    # SI ES TIENDA, LE DAMOS LA DIRECCIÓN Y BLOQUEAMOS SHOPIFY
+                    info_sistema = f"El cliente pregunta por la tienda. USA ESTA INFO: {INFO_TIENDA}"
+                
+                elif "PRODUCTO" in decision:
+                    res_shopify = consultar_productos(texto)
+                    if res_shopify == "NO_HAY_STOCK":
+                        info_sistema = "No se encontraron productos específicos. Invita a ver la web."
+                    else:
+                        info_sistema = res_shopify
+                
+                elif "COMPRAR" in decision:
+                     # Intentamos adivinar qué producto quiere comprar del texto o historial
+                     info_sistema = crear_link_pago(texto) 
+                     if "NO_ENCONTRE" in info_sistema:
+                         info_sistema = "No pude generar el link automático. Pide el nombre exacto."
 
-                # 2. Generador de Respuesta
+                # PASO 3: Generar Respuesta (SIN CONFUSIONES)
+                instruccion_saludo = "NO SALUDES DE NUEVO (se directo)" if len(historial) > 0 else "Saluda amable"
+
                 prompt_final = f"""
-                Eres "GlamBot", asistente de Glamstore Chile.
+                Actúa como GlamBot (Asistente de Glamstore Chile).
                 
-                DATOS OFICIALES TIENDA:
-                {INFO_TIENDA}
+                CONTEXTO:
+                - Cliente: {nombre}
+                - Estado: {instruccion_saludo}
                 
-                SITUACIÓN:
-                - Estado Conversación: {instruccion_saludo}
-                - Intención Cliente: {decision}
-                - Info Sistema (Shopify): {info_extra}
+                INFO DEL SISTEMA (LO QUE SABES):
+                {info_sistema}
                 
-                INSTRUCCIONES CLAVE:
-                1. REGLA DE ORO: Sé amable y educado. CERO insolencia.
-                2. SI PREGUNTA UBICACIÓN: Da la dirección de Puente Alto. NO menciones que "no aparecen productos acá", eso confunde.
-                3. SI PREGUNTA PRODUCTOS:
-                   - Si Info Sistema trae productos: Muéstralos con precio.
-                   - Si Info Sistema dice "NOT_FOUND": Di "No me aparece ese específico acá, pero revisa nuestra web ✨".
-                4. NO repitas "Hola" si la instrucción dice NO SALUDES.
+                INSTRUCCIONES FINALES:
+                1. Responde SOLO al mensaje del cliente. NO digas "Entendido" ni "Perfecto".
+                2. Si la Info del Sistema tiene la dirección, dásela clara.
+                3. Si la Info del Sistema tiene productos, muéstralos.
+                4. Sé amable, usa emojis, pero NO REPITAS SALUDOS si ya hay historial.
+                
+                ÚLTIMOS MENSAJES:
+                {texto_historial}
+                Cliente: "{texto}"
+                
+                TU RESPUESTA:
                 """
                 
                 try:
