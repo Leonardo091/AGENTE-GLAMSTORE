@@ -38,23 +38,22 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (MODO PRO - SIN LÍMITES) ---
+# --- 3. CONFIGURACIÓN GEMINI (PRIORIDAD ESTABILIDAD 1.5) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        logging.info("🚀 ACTIVANDO MODO PRO (Buscando gemini-2.0)...")
+        logging.info("🛡️ BUSCANDO MODELO ESTABLE...")
         
-        # LISTA DE PRIORIDAD: Del más potente al más básico
-        # Ahora que pagas, priorizamos el 2.0 que es ilimitado y rápido
+        # AQUÍ ESTÁ EL CAMBIO CLAVE:
+        # Ponemos el 1.5 Flash PRIMERO. Es el que nunca falla.
         prioridad = [
-            'models/gemini-2.0-flash',       # EL MEJOR (Ilimitado según tu foto)
-            'models/gemini-2.5-flash',       # Muy bueno (10k mensajes)
-            'models/gemini-1.5-flash',       # El clásico confiable
-            'models/gemini-pro'
+            'models/gemini-1.5-flash',       # EL HILUX (Estable, Rápido, Seguro)
+            'models/gemini-1.5-flash-latest',
+            'models/gemini-1.5-flash-001',
+            'models/gemini-2.0-flash'        # Dejamos el experimental al final por si acaso
         ]
         
-        # Obtenemos tu lista real
         mis_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
         modelo_elegido = None
@@ -63,15 +62,15 @@ if API_KEY_GEMINI:
                 modelo_elegido = p
                 break
         
-        # Si no encuentra los top, usa el primero que haya
+        # Si no, el primero que pille
         if not modelo_elegido and mis_modelos:
             modelo_elegido = mis_modelos[0]
 
         if modelo_elegido:
-            logging.info(f"💎 CEREBRO DE LUJO ACTIVADO: {modelo_elegido}")
+            logging.info(f"✅ CEREBRO ACTIVO: {modelo_elegido}")
             model = genai.GenerativeModel(modelo_elegido)
         else:
-            logging.error("❌ NO SE ENCONTRÓ MODELO (Improbable con tu cuenta nueva)")
+            logging.error("❌ NO SE ENCONTRÓ MODELO COMPATIBLE")
 
     except Exception as e:
         logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
@@ -190,7 +189,8 @@ def recibir_mensajes():
                     enviar_whatsapp(numero, res.text)
                 except Exception as e:
                     logging.error(f"❌ ERROR GEMINI RESPUESTA: {e}")
-                    enviar_whatsapp(numero, "Un segundo, estoy procesando...")
+                    # En caso de emergencia, enviamos mensaje genérico
+                    enviar_whatsapp(numero, "Dame un segundo, estoy reiniciando sistemas...")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
