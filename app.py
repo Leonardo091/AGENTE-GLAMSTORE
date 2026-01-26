@@ -19,14 +19,22 @@ SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 MI_PROPIA_URL = "https://agente-glamstore.onrender.com" 
 
+# --- 2. LA VERDAD ABSOLUTA (CONFIGURACIÓN MANUAL) ---
+# SI SHOPIFY FALLA O LA IA INVENTA, ESCRIBE AQUÍ TU INFO REAL
+INFO_MANUAL = """
+NOMBRE: Glamstore Chile
+UBICACIÓN: Santo Domingo 240 Puente alto, Al interior de Sandro's Collection, Santiago, Chile
+HORARIO: Lunes a Viernes 10:00 a 17:30 hrs y Sabado de 10:00 a 14:30 hrs
+POLITICA: No tenemos sucursales físicas en Malls por el momento, contamos con envios a todo Chile
+"""
+
 # --- MEMORIA Y ROBOT ---
 MEMORIA_CHATS = {} 
-MEMORIA_TIENDA = "Cargando..."
 
-# Robot Anti-Siesta (Más agresivo: cada 5 minutos)
+# Robot Anti-Siesta (5 min)
 def despertar_al_bot():
     while True:
-        time.sleep(300) # 300 segundos = 5 minutos
+        time.sleep(300)
         try: requests.get(MI_PROPIA_URL)
         except: pass
 
@@ -35,46 +43,62 @@ hilo.daemon = True
 hilo.start()
 
 @app.route("/")
-def home(): return "🤖 GLAMBOT ACTIVO", 200
+def home(): return "🤖 GLAMBOT ACTIVO v14", 200
 
-# --- 2. CARGA SHOPIFY ---
+# --- 3. CARGA SHOPIFY MEJORADA (LEE DIRECCIÓN) ---
 def cargar_informacion_tienda():
-    if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "Faltan credenciales"
+    if not SHOPIFY_TOKEN or not SHOPIFY_URL: return INFO_MANUAL
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
+    
+    info_construida = INFO_MANUAL + "\nDATOS DESDE SHOPIFY:\n"
+    
     try:
+        # 1. Intentamos leer datos de la tienda (Dirección real)
         res = requests.get(f"https://{tienda_url}/admin/api/2024-01/shop.json", headers=headers)
-        if res.status_code == 200: return "TIENDA ACTIVA"
-    except: pass
-    return "Error tienda"
+        if res.status_code == 200:
+            shop = res.json().get('shop', {})
+            direccion = shop.get('address1', 'Santiago')
+            ciudad = shop.get('city', 'Chile')
+            pais = shop.get('country_name', 'Chile')
+            email = shop.get('email', '')
+            
+            info_construida += f"- Dirección registrada: {direccion}, {ciudad}, {pais}.\n"
+            info_construida += f"- Contacto: {email}\n"
+            logging.info("✅ DATOS DE TIENDA CARGADOS")
+        else:
+            info_construida += "(Usando info manual por error de conexión)\n"
+            
+    except Exception as e:
+        logging.error(f"❌ Error cargando tienda: {e}")
+        
+    return info_construida
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. GEMINI LITE ---
+# --- 4. GEMINI LITE ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash-lite')
-    except:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+    try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
+    except: model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 4. FUNCIONES VENTAS ---
+# --- 5. FUNCIONES VENTAS ---
 def consultar_productos(busqueda):
     if not SHOPIFY_TOKEN: return "Error credenciales."
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
     params = {"title": busqueda, "status": "active", "limit": 5}
-    if busqueda.lower() in ["perfume", "perfumes", "arabe", "lista", "catalogo"]:
+    if busqueda.lower() in ["perfume", "perfumes", "arabe", "lista", "catalogo", "todo"]:
          params = {"status": "active", "limit": 5}
 
     try:
         r = requests.get(f"https://{tienda_url}/admin/api/2024-01/products.json", headers=headers, params=params)
         prods = r.json().get("products", [])
-        if not prods: return "No encontré ese producto específico en bodega."
+        if not prods: return "No encontré ese producto específico."
         
-        txt = "📦 ENCONTRÉ ESTO:\n"
+        txt = "📦 DISPONIBLE AHORA:\n"
         for p in prods:
             v = p['variants'][0]
             txt += f"▪️ {p['title']} (${float(v['price']):,.0f})\n"
@@ -86,7 +110,6 @@ def crear_link_pago(nombre_producto):
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    # Busca 1 producto exacto
     r = requests.get(f"https://{tienda_url}/admin/api/2024-01/products.json", 
                      headers=headers, params={"title": nombre_producto, "status": "active", "limit": 1})
     products = r.json().get("products", [])
@@ -102,7 +125,7 @@ def crear_link_pago(nombre_producto):
         return f"✅ Link para {products[0]['title']} (${float(v['price']):,.0f}):\n👉 {data.get('invoice_url')}"
     return "Error creando link."
 
-# --- 5. WEBHOOK NATURAL ---
+# --- 6. WEBHOOK CON REGLAS DE ORO ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -117,25 +140,23 @@ def recibir_mensajes():
 
             logging.info(f"📩 {nombre}: {texto}")
 
-            # GESTIÓN DE MEMORIA
             if numero not in MEMORIA_CHATS:
                 MEMORIA_CHATS[numero] = deque(maxlen=10)
             
-            # --- DEFINICIÓN DEL ESTADO DE LA CHARLA ---
             historial = list(MEMORIA_CHATS[numero])
             
-            # Aquí está la clave de la naturalidad:
-            estado_conversacion = ""
+            # --- LÓGICA ESTRICTA DE ESTADO ---
+            instruccion_estado = ""
             if len(historial) == 0:
-                estado_conversacion = "INICIO: Es el primer mensaje. Saluda con entusiasmo a " + nombre + "."
+                instruccion_estado = "FASE 1 (INICIO): Saluda amable y corto."
             else:
-                estado_conversacion = "EN CURSO: Ya estamos hablando. NO SALUDES. Responde directo y fluido, como un chat de amigos."
+                instruccion_estado = "FASE 2 (EN CURSO): PROHIBIDO SALUDAR. Responde DIRECTO al grano."
 
             texto_historial = "\n".join([f"- {h['rol']}: {h['txt']}" for h in historial])
 
             if model:
                 # 1. Detector
-                prompt_det = f"Historial: {texto_historial}\nCliente: '{texto}'\nDefine acción: VENDER:[prod], BUSCAR:[prod] o CHARLA."
+                prompt_det = f"Historial: {texto_historial}\nCliente: '{texto}'\nAcción: VENDER:[prod], BUSCAR:[prod] o CHARLA."
                 try: decision = model.generate_content(prompt_det).text.strip().split("\n")[0]
                 except: decision = "CHARLA"
 
@@ -143,31 +164,32 @@ def recibir_mensajes():
                 if "VENDER:" in decision: info_extra = crear_link_pago(decision.split(":")[1])
                 elif "BUSCAR:" in decision: info_extra = consultar_productos(decision.split(":")[1])
 
-                # 2. Generador con ESTADO DE CONVERSACIÓN
+                # 2. Generador BLINDADO CONTRA MENTIRAS
                 prompt_final = f"""
                 Eres GlamBot de Glamstore Chile.
                 
-                ESTADO ACTUAL DE LA CONVERSACIÓN:
-                👉 {estado_conversacion}
+                FUENTE DE LA VERDAD (Información oficial):
+                {MEMORIA_TIENDA}
+                (SI NO SALE AQUÍ, NO EXISTE. NO INVENTES SUCURSALES).
                 
-                HISTORIAL PREVIO:
+                ESTADO CONVERSACIÓN: {instruccion_estado}
+                
+                HISTORIAL:
                 {texto_historial}
                 
-                LO ÚLTIMO:
-                {nombre} dijo: "{texto}"
-                Info Sistema: {info_extra}
+                CLIENTE DIJO: "{texto}"
+                DATO EXTRA SISTEMA: {info_extra}
                 
-                COMO RESPONDER:
-                - Actúa como un humano en WhatsApp.
-                - Si el ESTADO es "EN CURSO", sería muy raro decir "Hola" de nuevo. No lo hagas.
-                - Sé servicial y usa emojis.
+                INSTRUCCIONES:
+                1. Si estás en FASE 2, NO DIGAS "Hola" ni "Buenos días".
+                2. Si preguntan ubicación, usa SOLO la información de la FUENTE DE LA VERDAD. Si no sale dirección exacta, di que somos tienda online. NO INVENTES MALLS.
+                3. Sé natural y chileno.
                 """
                 
                 try:
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
                     
-                    # Guardamos
                     MEMORIA_CHATS[numero].append({"rol": nombre, "txt": texto})
                     MEMORIA_CHATS[numero].append({"rol": "Bot", "txt": respuesta})
                     
