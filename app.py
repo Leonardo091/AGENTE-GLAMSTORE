@@ -2,22 +2,39 @@ import os
 import logging
 from flask import Flask, request, jsonify
 import requests
-import google.generativeai as genai  # <-- IMPORTAMOS GEMINI
+import google.generativeai as genai
 
-# Configuración básica
+# Configuración básica de logs
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # 1. CONFIGURACIÓN DE CREDENCIALES
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
-API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY") # <-- TOMAMOS LA LLAVE DE RENDER
+API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
-# 2. CONFIGURAMOS GEMINI
+# 2. CONFIGURAMOS GEMINI Y DIAGNÓSTICO
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
-    # Usamos el modelo rápido y bueno para chat
-    model = genai.GenerativeModel('gemini-pro')
+    
+    # --- BLOQUE DE DIAGNÓSTICO (Para ver qué cerebros tienes) ---
+    try:
+        logging.info("🔍 DIAGNÓSTICO: Buscando modelos disponibles en tu llave...")
+        modelos_disponibles = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                modelos_disponibles.append(m.name)
+                logging.info(f"🧠 CEREBRO ENCONTRADO: {m.name}")
+        
+        if not modelos_disponibles:
+            logging.error("❌ ALERTA: Tu llave es válida, pero NO TIENE modelos activados. Crea una nueva en un proyecto nuevo.")
+    except Exception as e:
+        logging.error(f"❌ ERROR CRÍTICO al listar modelos: {e}")
+    # -----------------------------------------------------------
+
+    # Intentamos usar el modelo Flash (es el más rápido y actual)
+    # Si falla, miraremos los logs del diagnóstico para cambiar este nombre
+    model = genai.GenerativeModel('gemini-1.5-flash') 
 else:
     logging.error("¡FALTA LA GEMINI_API_KEY EN RENDER!")
 
@@ -63,7 +80,8 @@ def recibir_mensajes():
                 
             except Exception as e:
                 logging.error(f"❌ ERROR CEREBRAL: {str(e)}")
-                enviar_whatsapp(numero, "Tuve un error pensando... intenta de nuevo.")
+                # Mensaje de error amigable para ti mientras probamos
+                enviar_whatsapp(numero, "Estoy teniendo problemas con mi cerebro (API Key). Revisa los logs de Render.")
             # ---------------------------------------
 
         return jsonify({"status": "recibido"}), 200
@@ -74,12 +92,8 @@ def recibir_mensajes():
 
 # 5. FUNCIÓN PARA ENVIAR (La Boca)
 def enviar_whatsapp(numero, texto):
-    url = "https://graph.facebook.com/v21.0/939839529214459/messages" # OJO: Revisa que este ID sea el tuyo
-    # TRUCO: Mejor usa el ID dinámico si puedes, pero por ahora usa el que te funcionó en Postman
-    # Si quieres asegurar, usa el ID de teléfono que usaste en Postman.
-    
-    # IMPORTANTE: Reemplaza este ID '569839692873155' por TU PHONE_NUMBER_ID real
-    # Lo puedes sacar de tus logs anteriores donde dice "phone_number_id"
+    # Usamos tu ID de teléfono confirmado
+    url = "https://graph.facebook.com/v21.0/939839529214459/messages"
     
     headers = {
         "Authorization": f"Bearer {TOKEN_WHATSAPP}",
@@ -97,8 +111,7 @@ def enviar_whatsapp(numero, texto):
     if response.status_code == 200:
         logging.info("✅ MENSAJE ENVIADO")
     else:
-        logging.error(f"❌ ERROR AL ENVIAR: {response.text}")
+        logging.error(f"❌ ERROR AL ENVIAR A WHATSAPP: {response.text}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
