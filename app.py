@@ -8,64 +8,81 @@ import google.generativeai as genai
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# --- 1. CREDENCIALES (ADAPTADAS A TUS VARIABLES DE RENDER) ---
-# Usamos los nombres exactos que tienes en tu imagen
+# --- 1. CREDENCIALES ---
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
-# OJO: Aquí cambié el código para que lea TU variable
-VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN") 
+VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN") # Tu variable de Render
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 
 MEMORIA_TIENDA = "Cargando..."
 
-# --- 2. CARGA DE DATOS INICIAL ---
+# --- 2. CARGA DE DATOS SHOPIFY ---
 def cargar_informacion_tienda():
-    if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "⚠️ Faltan credenciales en Render."
-    
-    # Limpiamos la URL para que quede solo el dominio (ej: tienda.myshopify.com)
+    if not SHOPIFY_TOKEN or not SHOPIFY_URL: return "⚠️ Faltan credenciales."
+    # Limpieza de URL
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("http://", "").replace("/", "")
-    
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     info = "DATOS GLAMSTORE:\n"
-    
     try:
-        # Probamos conexión leyendo datos de la tienda
         res = requests.get(f"https://{tienda_url}/admin/api/2024-01/shop.json", headers=headers)
-        
         if res.status_code == 200:
             shop = res.json().get('shop', {})
             info += f"Web: {shop.get('domain')}\nEmail: {shop.get('email')}\nMoneda: {shop.get('currency')}\n"
-            logging.info("✅ CONEXIÓN EXITOSA CON SHOPIFY")
+            logging.info(f"✅ CONECTADO A SHOPIFY: {tienda_url}")
         else:
-            logging.error(f"❌ ERROR CONECTANDO A SHOPIFY: {res.status_code}")
-            logging.error(f"MIRA ESTO: {res.text}")
-            info += "(Error de conexión con la tienda, revisa la URL en Render)\n"
-            
+            logging.error(f"❌ ERROR SHOPIFY: {res.status_code} - Revisa la URL en Render")
+            info += "(Error conexión tienda)\n"
     except Exception as e:
         logging.error(f"❌ ERROR CRÍTICO: {e}")
-        pass
     return info
 
-# Ejecutamos la carga al iniciar
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI ---
+# --- 3. CONFIGURACIÓN GEMINI (AUTO-PILOTO CON PRIORIDAD GRATUITA) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        # Buscamos modelo disponible
-        modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        favs = ['models/gemini-1.5-flash', 'models/gemini-pro', 'models/gemini-1.5-pro-latest']
-        elegido = next((f for f in favs if f in modelos), modelos[0] if modelos else None)
-        model = genai.GenerativeModel(elegido)
-        logging.info(f"🧠 CEREBRO ACTIVO: {elegido}")
-    except:
-        logging.error("❌ NO SE PUDO INICIAR GEMINI")
-        model = None
+        logging.info("🔍 ESCANEANDO MODELOS DISPONIBLES...")
+        # Obtenemos todos los modelos de tu cuenta
+        modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # ESTA ES LA LISTA MAESTRA DE PRIORIDAD
+        # El código buscará en este orden exacto. Si encuentra el primero, se casa con ese.
+        orden_prioridad = [
+            'models/gemini-1.5-flash',        # EL REY (Rápido y Gratis)
+            'models/gemini-1.5-flash-001',    # Versión específica estable
+            'models/gemini-1.5-flash-latest', # Última versión flash
+            'models/gemini-1.0-pro',          # El clásico confiable
+            'models/gemini-pro'               # El abuelo
+        ]
+        
+        modelo_elegido = None
+        
+        # 1. Buscamos coincidencias en nuestra lista de prioridad
+        for candidato in orden_prioridad:
+            if candidato in modelos_disponibles:
+                modelo_elegido = candidato
+                break
+        
+        # 2. Si no encontramos ninguno de los favoritos, usamos el primero que aparezca (Plan Z)
+        # PERO filtramos para evitar el 2.5 si es posible
+        if not modelo_elegido and modelos_disponibles:
+            modelo_elegido = modelos_disponibles[0]
 
-# --- 4. FUNCIONES DE TIENDA (Búsqueda y Pedidos) ---
+        if modelo_elegido:
+            logging.info(f"🧠 CEREBRO SELECCIONADO: {modelo_elegido}")
+            model = genai.GenerativeModel(modelo_elegido)
+        else:
+            logging.error("❌ NO SE ENCONTRÓ NINGÚN MODELO COMPATIBLE")
+
+    except Exception as e:
+        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
+        # Intento desesperado final
+        model = genai.GenerativeModel('gemini-1.5-flash')
+
+# --- 4. FUNCIONES DE TIENDA ---
 def consultar_productos(busqueda):
     if not SHOPIFY_TOKEN: return "Error credenciales."
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
@@ -90,7 +107,6 @@ def crear_link_pago(nombre_producto):
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
 
-    # 1. Buscar producto
     url_search = f"https://{tienda_url}/admin/api/2024-01/products.json"
     params = {"title": nombre_producto, "status": "active", "limit": 1}
     
@@ -98,12 +114,11 @@ def crear_link_pago(nombre_producto):
         r_search = requests.get(url_search, headers=headers, params=params)
         products = r_search.json().get("products", [])
         
-        if not products: return f"No encontré el producto '{nombre_producto}' para generar el link."
+        if not products: return f"No encontré '{nombre_producto}' para crear el pedido."
             
         variant_id = products[0]['variants'][0]['id']
         product_title = products[0]['title']
 
-        # 2. Crear Draft Order
         url_create = f"https://{tienda_url}/admin/api/2024-01/draft_orders.json"
         payload = {
             "draft_order": {
@@ -119,15 +134,14 @@ def crear_link_pago(nombre_producto):
             numero = data.get("name", "#Draft")
             url_pago = data.get("invoice_url")
             total = float(data.get("total_price", 0))
-            
-            return f"✅ PEDIDO {numero} GENERADO\nProducto: {product_title}\nTotal: ${total:,.0f}\n\nLINK PAGO: {url_pago}"
+            return f"✅ PEDIDO {numero} GENERADO\nProducto: {product_title}\nTotal: ${total:,.0f}\nLINK PAGO: {url_pago}"
         else:
             return f"Error creando pedido: {r_create.status_code}"
 
     except Exception as e:
         return f"Error técnico: {e}"
 
-# --- 5. WEBHOOK Y LÓGICA ---
+# --- 5. WEBHOOK ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -154,6 +168,7 @@ def recibir_mensajes():
                 """
                 try:
                     decision = model.generate_content(prompt_det).text.strip()
+                    logging.info(f"🧠 INTENCIÓN: {decision}")
                 except: decision = "NULL"
                 
                 info_extra = ""
@@ -164,7 +179,6 @@ def recibir_mensajes():
                 else:
                     info_extra = MEMORIA_TIENDA
 
-                # Respuesta final
                 prompt_final = f"""
                 Eres el equipo de Glamstore Chile.
                 INFO DEL SISTEMA: {info_extra}
@@ -175,25 +189,25 @@ def recibir_mensajes():
                 - Si es info de producto, dásela.
                 - Sé amable y breve.
                 """
-                res = model.generate_content(prompt_final)
-                enviar_whatsapp(numero, res.text)
+                
+                try:
+                    res = model.generate_content(prompt_final)
+                    enviar_whatsapp(numero, res.text)
+                except Exception as e:
+                    logging.error(f"❌ ERROR AL GENERAR RESPUESTA: {e}")
+                    enviar_whatsapp(numero, "Tuve un problema momentáneo. ¿Me repites?")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
 
-# VERIFICACIÓN DE TOKEN (Usando META_VERIFY_TOKEN)
+# VERIFICACIÓN
 @app.route("/webhook", methods=["GET"])
 def verificar():
-    # AQUÍ ES DONDE LEEMOS TU VARIABLE EXACTA
     verify_token_env = os.environ.get("META_VERIFY_TOKEN")
-    
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    
-    if mode == "subscribe" and token == verify_token_env:
-        return challenge, 200
-    return "Error verificación", 403
+    if mode == "subscribe" and token == verify_token_env: return request.args.get("hub.challenge"), 200
+    return "Error", 403
 
 def enviar_whatsapp(num, txt):
     url = "https://graph.facebook.com/v21.0/939839529214459/messages"
