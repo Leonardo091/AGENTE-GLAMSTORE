@@ -38,18 +38,42 @@ def cargar_informacion_tienda():
 
 MEMORIA_TIENDA = cargar_informacion_tienda()
 
-# --- 3. CONFIGURACIÓN GEMINI (MANUAL Y FORZADA) ---
+# --- 3. CONFIGURACIÓN GEMINI (FILTRO ANTI-2.5) ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try:
-        # ¡AQUÍ ESTÁ EL CAMBIO!
-        # Nada de buscar listas. Le ponemos el nombre EXACTO del modelo gratuito robusto.
-        logging.info("🔒 FORZANDO MODELO: gemini-1.5-flash")
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        logging.info("🔍 BUSCANDO MODELO SEGURO...")
         
+        # 1. Pedimos la lista de modelos disponibles en TU cuenta
+        todos_los_modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 2. FILTRO DE SEGURIDAD: Quitamos cualquiera que diga "2.5" (porque te bloquea)
+        modelos_seguros = [m for m in todos_los_modelos if "2.5" not in m]
+        
+        modelo_final = None
+        
+        # 3. Buscamos el mejor candidato entre los seguros
+        # Prioridad 1: Alguno que sea "flash" (rápido y gratis)
+        for m in modelos_seguros:
+            if "flash" in m:
+                modelo_final = m
+                break
+        
+        # Prioridad 2: Si no hay flash, usamos cualquiera seguro (ej: pro)
+        if not modelo_final and modelos_seguros:
+            modelo_final = modelos_seguros[0]
+            
+        if modelo_final:
+            logging.info(f"✅ CEREBRO ELEGIDO: {modelo_final}")
+            model = genai.GenerativeModel(modelo_final)
+        else:
+            logging.error("❌ NO SE ENCONTRÓ NINGÚN MODELO SEGURO.")
+            # Intento de emergencia
+            model = genai.GenerativeModel('gemini-pro')
+
     except Exception as e:
-        logging.error(f"❌ ERROR GEMINI: {e}")
+        logging.error(f"❌ ERROR INICIANDO GEMINI: {e}")
         model = None
 
 # --- 4. FUNCIONES DE TIENDA ---
@@ -165,7 +189,7 @@ def recibir_mensajes():
                     enviar_whatsapp(numero, res.text)
                 except Exception as e:
                     logging.error(f"❌ ERROR GEMINI RESPUESTA: {e}")
-                    enviar_whatsapp(numero, "Estoy reiniciando mis neuronas. Dame 1 minuto.")
+                    enviar_whatsapp(numero, "Un segundo, estoy procesando...")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
