@@ -23,10 +23,10 @@ MI_PROPIA_URL = "https://agente-glamstore.onrender.com"
 MEMORIA_CHATS = {} 
 MEMORIA_TIENDA = "Cargando..."
 
-# Robot Anti-Siesta (Suave)
+# Robot Anti-Siesta (Más agresivo: cada 5 minutos)
 def despertar_al_bot():
     while True:
-        time.sleep(600)
+        time.sleep(300) # 300 segundos = 5 minutos
         try: requests.get(MI_PROPIA_URL)
         except: pass
 
@@ -117,47 +117,57 @@ def recibir_mensajes():
 
             logging.info(f"📩 {nombre}: {texto}")
 
+            # GESTIÓN DE MEMORIA
             if numero not in MEMORIA_CHATS:
                 MEMORIA_CHATS[numero] = deque(maxlen=10)
             
+            # --- DEFINICIÓN DEL ESTADO DE LA CHARLA ---
             historial = list(MEMORIA_CHATS[numero])
+            
+            # Aquí está la clave de la naturalidad:
+            estado_conversacion = ""
+            if len(historial) == 0:
+                estado_conversacion = "INICIO: Es el primer mensaje. Saluda con entusiasmo a " + nombre + "."
+            else:
+                estado_conversacion = "EN CURSO: Ya estamos hablando. NO SALUDES. Responde directo y fluido, como un chat de amigos."
+
             texto_historial = "\n".join([f"- {h['rol']}: {h['txt']}" for h in historial])
 
             if model:
-                # 1. Detector de Intención
-                prompt_det = f"Historial: {texto_historial}\nCliente dice: '{texto}'\nDefine acción: VENDER:[prod], BUSCAR:[prod] o CHARLA."
-                try:
-                    decision = model.generate_content(prompt_det).text.strip().split("\n")[0]
+                # 1. Detector
+                prompt_det = f"Historial: {texto_historial}\nCliente: '{texto}'\nDefine acción: VENDER:[prod], BUSCAR:[prod] o CHARLA."
+                try: decision = model.generate_content(prompt_det).text.strip().split("\n")[0]
                 except: decision = "CHARLA"
 
                 info_extra = ""
                 if "VENDER:" in decision: info_extra = crear_link_pago(decision.split(":")[1])
                 elif "BUSCAR:" in decision: info_extra = consultar_productos(decision.split(":")[1])
 
-                # 2. Generador de Respuesta NATURAL
-                # Aquí le enseñamos LÓGICA DE CONVERSACIÓN, no prohibiciones.
+                # 2. Generador con ESTADO DE CONVERSACIÓN
                 prompt_final = f"""
-                Eres GlamBot de Glamstore Chile. Estás chateando por WhatsApp con {nombre}.
+                Eres GlamBot de Glamstore Chile.
                 
-                HISTORIAL DE LA CHARLA:
+                ESTADO ACTUAL DE LA CONVERSACIÓN:
+                👉 {estado_conversacion}
+                
+                HISTORIAL PREVIO:
                 {texto_historial}
                 
-                LO QUE ACABA DE PASAR:
+                LO ÚLTIMO:
                 {nombre} dijo: "{texto}"
-                Información del sistema: {info_extra}
+                Info Sistema: {info_extra}
                 
-                INSTRUCCIONES DE FLUIDEZ (SENTIDO COMÚN):
-                1. Revisa el historial de arriba.
-                2. SI EL HISTORIAL ESTÁ VACÍO: Significa que la conversación recién empieza. Saluda amablemente.
-                3. SI YA HAY MENSAJES PREVIOS: Significa que YA estamos hablando. NO saludes de nuevo. Continúa el hilo de forma natural, respondiendo directo a lo que preguntó ahora.
-                4. Usa el nombre {nombre} para que se sienta cercano.
-                5. Sé breve, como un chat de amigos.
+                COMO RESPONDER:
+                - Actúa como un humano en WhatsApp.
+                - Si el ESTADO es "EN CURSO", sería muy raro decir "Hola" de nuevo. No lo hagas.
+                - Sé servicial y usa emojis.
                 """
                 
                 try:
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
                     
+                    # Guardamos
                     MEMORIA_CHATS[numero].append({"rol": nombre, "txt": texto})
                     MEMORIA_CHATS[numero].append({"rol": "Bot", "txt": respuesta})
                     
