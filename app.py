@@ -19,7 +19,7 @@ if API_KEY_GEMINI:
     
     # ¡AQUÍ ESTÁ EL CAMBIO! Usamos el modelo que apareció en tu lista
     # gemini-2.0-flash es rapidísimo y potente
-    model = genai.GenerativeModel('gemini-2.0-flash') 
+    model = genai.GenerativeModel('gemini-1.5-flash') 
 else:
     logging.error("¡FALTA LA GEMINI_API_KEY EN RENDER!")
 
@@ -94,3 +94,4 @@ def enviar_whatsapp(numero, texto):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
