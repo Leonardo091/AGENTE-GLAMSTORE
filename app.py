@@ -13,34 +13,40 @@ TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
+# --- PERSONALIDAD DEL BOT (AQUÍ ESTÁ LA MAGIA) ---
+INSTRUCCIONES_SISTEMA = """
+Eres un asistente virtual experto y amable de la tienda "Glamstore Chile".
+Tu objetivo es ayudar a los clientes con dudas sobre productos y ventas.
+IMPORTANTE:
+- Responde SIEMPRE en Español.
+- Usa un tono cercano y chileno, pero respetuoso.
+- Si te saludan, preséntate como el asistente de Glamstore.
+- Sé breve y conciso (WhatsApp es para mensajes cortos).
+"""
+# -------------------------------------------------
+
 # 2. CONFIGURACIÓN "AUTO-PILOTO" DE GEMINI
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     
     try:
         logging.info("🔍 DETECTANDO CEREBRO AUTOMÁTICAMENTE...")
-        
-        # Listamos todos los modelos que sirven para generar texto
         modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # Definimos nuestros favoritos en orden (del más rápido al más seguro)
         favoritos = [
             'models/gemini-1.5-flash',
             'models/gemini-1.5-flash-latest',
             'models/gemini-1.0-pro',
             'models/gemini-pro',
-            'models/gemini-flash-latest' # El alias que vimos en tus logs
+            'models/gemini-flash-latest'
         ]
         
         modelo_elegido = None
-        
-        # Buscamos si alguno de los favoritos está en tu lista
         for fav in favoritos:
             if fav in modelos_disponibles:
                 modelo_elegido = fav
                 break
         
-        # Si no encontramos ninguno favorito, usamos el PRIMERO que haya (el comodín)
         if not modelo_elegido and modelos_disponibles:
             modelo_elegido = modelos_disponibles[0]
             
@@ -48,12 +54,11 @@ if API_KEY_GEMINI:
             logging.info(f"✅ CEREBRO CONECTADO: {modelo_elegido}")
             model = genai.GenerativeModel(modelo_elegido)
         else:
-            logging.error("❌ NO SE ENCONTRARON MODELOS DISPONIBLES EN TU CUENTA")
+            logging.error("❌ NO SE ENCONTRARON MODELOS DISPONIBLES")
             model = None
 
     except Exception as e:
         logging.error(f"⚠️ FALLÓ EL AUTO-PILOTO: {e}")
-        # Intento desesperado final
         model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     logging.error("¡FALTA LA GEMINI_API_KEY EN RENDER!")
@@ -86,8 +91,10 @@ def recibir_mensajes():
 
             try:
                 if model:
-                    # Usamos el modelo que el auto-piloto eligió
-                    response = model.generate_content(texto_usuario)
+                    # --- AQUÍ MEZCLAMOS LA PERSONALIDAD CON EL MENSAJE ---
+                    prompt_final = f"{INSTRUCCIONES_SISTEMA}\n\nCliente dice: {texto_usuario}"
+                    
+                    response = model.generate_content(prompt_final)
                     respuesta = response.text
                 else:
                     respuesta = "Estoy sin cerebro (Error de API Key)."
@@ -97,7 +104,7 @@ def recibir_mensajes():
                 
             except Exception as e:
                 logging.error(f"❌ ERROR GENERANDO RESPUESTA: {str(e)}")
-                enviar_whatsapp(numero, "Tuve un error procesando tu mensaje. Intenta de nuevo.")
+                enviar_whatsapp(numero, "Ups, tuve un error técnico. ¿Me repites?")
 
         return jsonify({"status": "ok"}), 200
     except:
