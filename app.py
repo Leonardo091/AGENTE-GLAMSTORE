@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
-VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
 MEMORIA_USUARIOS = {}
@@ -31,25 +30,18 @@ hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
 hilo_ping.start()
 
-# --- WEB PANEL (SIMPLE Y RÁPIDO) ---
 @app.route("/")
 def home():
     try:
-        # Probamos conexión rápida para ver si el híbrido funciona
-        estado_ram = "CARGADA ✅" if db.total_items > 0 else "VACÍA (Usando Modo Respaldo) ⚠️"
-        
+        estado = "🟢 CONECTADO" if db.total_items > 0 else "⚠️ MODO RESPALDO (Directo a Shopify)"
         return jsonify({
-            "estado_sistema": "ONLINE 🟢",
-            "hora": obtener_hora_chile(),
-            "memoria_ram": f"{db.total_items} productos",
-            "estado_actual": estado_ram,
-            "identidad": db.obtener_identidad(),
-            "nota": "Si la memoria está vacía, no te preocupes, el bot busca directo en Shopify."
+            "estado": estado, 
+            "productos_ram": db.total_items, 
+            "mensaje": "El bot solo venderá lo que encuentre aquí."
         }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
-# --- GEMINI ---
+# Gemini
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
@@ -70,7 +62,6 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # Memoria
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
@@ -94,45 +85,43 @@ def recibir_mensajes():
 
                 info_sistema = ""
 
-                # 2. EJECUTAR (USANDO DB HÍBRIDA)
+                # 2. EJECUTAR
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
-                    if link == "NO_ENCONTRE_EXACTO": info_sistema = "No encontré el nombre exacto."
-                    elif link == "ERROR_LINK": info_sistema = "Error técnico link."
-                    else: info_sistema = f"✅ Link: {link}"
+                    if link == "NO_ENCONTRE_EXACTO": info_sistema = "❌ PRODUCTO NO ENCONTRADO EN SISTEMA."
+                    elif link == "ERROR_LINK": info_sistema = "Error técnico al generar link."
+                    else: info_sistema = f"✅ Link generado: {link}"
 
                 elif "BUSCAR" in decision:
                     res = db.buscar_producto_rapido(texto)
                     if res["tipo"] == "VACIO": 
-                        info_sistema = "No encontré coincidencias."
+                        # ESTO ES CLAVE: Le decimos explícitamente que NO HAY.
+                        info_sistema = "RESULTADO DE BÚSQUEDA: 0 COINCIDENCIAS. NO TENEMOS ESTE PRODUCTO."
                     else:
-                        titulo = "ENCONTRÉ:" if res["tipo"] == "EXACTO" else "RECOMIENDO:"
+                        titulo = "EN STOCK:" if res["tipo"] == "EXACTO" else "RECOMENDACIONES STOCK:"
                         items = ""
                         for p in res["items"]:
                             items += f"\n🔹 {p['title']} (${p['price']:,.0f})"
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
-                    info_sistema = f"""
-                    Ubicación: Santo Domingo 240, Puente Alto.
-                    Horario: Lun-Vie 10:00-19:00, Sab 10:00-14:00.
-                    """
+                    info_sistema = "Ubicación: Santo Domingo 240, Puente Alto. Horario: Lun-Vie 10-19, Sab 10-14."
 
-                # 3. RESPONDER
+                # 3. RESPONDER (CON CANDADO)
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
-                identidad = db.obtener_identidad()
                 
                 prompt_final = f"""
-                Eres GlamBot.
+                Eres GlamBot, vendedor honesto de Glamstore.
                 
-                VITRINA: {identidad}
+                TU INVENTARIO REAL (LO ÚNICO QUE EXISTE):
+                {info_sistema}
                 
-                REGLAS:
-                1. NO digas "Cargando datos".
-                2. NO uses comillas.
-                3. {saludo}.
-                
-                DATA SISTEMA: {info_sistema}
+                REGLAS SUPREMAS (LEER CON ATENCIÓN):
+                1. SI LA DATA DICE "0 COINCIDENCIAS" O "NO TENEMOS", DEBES DECIR: "Lo siento, actualmente no trabajamos ese producto" y sugerir que pregunten por otra cosa.
+                2. JAMÁS inventes que tenemos una marca si no aparece en la lista de arriba.
+                3. JAMÁS inventes links tipo [Enlace...]. Si no tienes el link real, no lo mandes.
+                4. Solo vende lo que ves en "TU INVENTARIO REAL". El resto NO EXISTE para ti.
+                5. {saludo}.
                 
                 Chat: {historial_txt}
                 Cliente: "{texto}"
@@ -141,8 +130,7 @@ def recibir_mensajes():
                 try:
                     res = model.generate_content(prompt_final)
                     respuesta = res.text.replace("Bot:", "").replace("GlamBot:", "").strip()
-                    if respuesta.startswith('"') and respuesta.endswith('"'):
-                        respuesta = respuesta[1:-1]
+                    if respuesta.startswith('"') and respuesta.endswith('"'): respuesta = respuesta[1:-1]
                     
                     usuario['historial'].append({"rol": nombre, "txt": texto})
                     usuario['historial'].append({"rol": "Bot", "txt": respuesta})
@@ -152,8 +140,7 @@ def recibir_mensajes():
                         headers={"Authorization": f"Bearer {TOKEN_WHATSAPP}", "Content-Type": "application/json"},
                         json={"messaging_product": "whatsapp", "to": numero, "type": "text", "text": {"body": respuesta}}
                     )
-                except Exception as e:
-                    logging.error(f"Error Gen: {e}")
+                except Exception as e: logging.error(f"Error Gen: {e}")
 
         return jsonify({"status": "ok"}), 200
     except: return jsonify({"status": "ok"}), 200
