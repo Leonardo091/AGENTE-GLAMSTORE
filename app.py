@@ -7,10 +7,9 @@ from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
 
-# --- IMPORTAMOS LA BASE DE DATOS (Cerebro) ---
+# Importamos la base de datos
 from database import db 
 
-# Configuración
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
@@ -35,53 +34,40 @@ hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
 hilo_ping.start()
 
-# --- RUTA HOME (PANEL DE CONTROL VISUAL) ---
+# --- RUTA HOME (MODO JSON ULTRALIGERO) ---
+# Esto soluciona el problema de que la página no cargue
 @app.route("/")
 def home():
-    # Pedimos datos a la DB
-    lista = db.productos
-    total = db.total_items
-    identidad = db.obtener_identidad()
-    hora = obtener_hora_chile()
-    
-    # Creamos lista HTML (Adaptada a versión Lite)
-    html_items = ""
-    for p in lista:
-        # AQUI ESTÁ EL CAMBIO: Usamos 'price' directo
-        try: precio = float(p['price'])
-        except: precio = 0
-        html_items += f"<li style='margin-bottom: 5px;'>🛒 <b>{p['title']}</b> - ${precio:,.0f}</li>"
+    try:
+        total = db.total_items
+        identidad = db.obtener_identidad()
+        hora = obtener_hora_chile()
+        
+        # Muestra pequeña de 5 productos
+        muestra = []
+        for p in db.productos[:5]:
+            muestra.append({
+                "producto": p['title'],
+                "precio": p['price']
+            })
+            
+        return jsonify({
+            "estado": "ONLINE 🟢",
+            "hora_servidor": hora,
+            "total_productos_ram": total,
+            "identidad": identidad,
+            "ejemplo_catalogo": muestra
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return f"""
-    <html>
-        <head>
-            <title>Panel GlamBot 🧠</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; padding: 20px; background: #f4f4f9; }}
-                .card {{ background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-                h1 {{ color: #d63384; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h1>🤖 Cerebro de GlamBot v31</h1>
-                <p><b>🕒 Hora:</b> {hora} | <b>📦 Productos en RAM:</b> {total}</p>
-                <p><b>👀 Identidad:</b> {identidad}</p>
-                <hr>
-                <ul>{html_items}</ul>
-            </div>
-        </body>
-    </html>
-    """, 200
-
-# --- CONFIGURACIÓN GEMINI ---
+# Configuración Gemini
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except: model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- WEBHOOK (WHATSAPP) ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -96,7 +82,7 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # Gestión de Memoria
+            # Memoria Chat
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
@@ -120,7 +106,7 @@ def recibir_mensajes():
 
                 info_sistema = ""
 
-                # 2. EJECUTAR (Lógica del Negocio)
+                # 2. EJECUTAR
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
                     if link == "NO_ENCONTRE_EXACTO": info_sistema = "No encontré el nombre exacto."
@@ -132,12 +118,10 @@ def recibir_mensajes():
                     if res["tipo"] == "VACIO": info_sistema = "Sin coincidencias."
                     else:
                         titulo = "ENCONTRÉ:" if res["tipo"] == "EXACTO" else "RECOMIENDO:"
-                        # AQUI ESTÁ EL CAMBIO: Usamos p['price'] directo
                         items = ""
                         for p in res["items"]:
-                            try: prec = float(p['price'])
-                            except: prec = 0
-                            items += f"\n🔹 {p['title']} (${prec:,.0f})"
+                            # Precio ya viene limpio desde database.py
+                            items += f"\n🔹 {p['title']} (${p['price']:,.0f})"
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
@@ -147,7 +131,7 @@ def recibir_mensajes():
                     Horario: Lun-Vie hasta 17:30, Sab hasta 14:30.
                     """
 
-                # 3. RESPONDER (Con limpieza de formato)
+                # 3. RESPONDER
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 identidad = db.obtener_identidad()
                 
@@ -158,7 +142,6 @@ def recibir_mensajes():
                 
                 REGLAS FORMATO:
                 1. NUNCA escribas "Bot:" ni uses comillas.
-                2. Sé directo y amable.
                 
                 REGLAS NEGOCIO:
                 1. NO VENDEMOS ROPA.
@@ -174,7 +157,7 @@ def recibir_mensajes():
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
                     
-                    # Filtro de limpieza (La Aspiradora)
+                    # Limpieza final (La Aspiradora)
                     respuesta = respuesta.replace("Bot:", "").replace("GlamBot:", "").strip()
                     if respuesta.startswith('"') and respuesta.endswith('"'):
                         respuesta = respuesta[1:-1]
