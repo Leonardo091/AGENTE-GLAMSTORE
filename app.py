@@ -7,8 +7,7 @@ from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
 
-# --- IMPORTACIÓN MÁGICA ---
-# Aquí traemos el cerebro desde el otro archivo
+# Traemos el cerebro desde database.py
 from database import db 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +29,6 @@ def despertar_render():
         try: requests.get("https://agente-glamstore.onrender.com")
         except: pass
 
-# Iniciamos ping en segundo plano (pero app.py ya no maneja la DB)
 import threading
 hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
@@ -38,8 +36,7 @@ hilo_ping.start()
 
 @app.route("/")
 def home():
-    # Consultamos el estado a database.py
-    return f"🤖 GLAMBOT v29 (MODULAR) ACTIVO<br>Identidad: {db.obtener_identidad()}", 200
+    return f"🤖 GLAMBOT v30 (FORMATO LIMPIO)<br>Identidad: {db.obtener_identidad()}", 200
 
 # Gemini
 model = None
@@ -62,7 +59,7 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # Memoria Chat
+            # Memoria
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
@@ -86,7 +83,7 @@ def recibir_mensajes():
 
                 info_sistema = ""
 
-                # 2. EJECUTAR (Llamando a database.py)
+                # 2. EJECUTAR
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
                     if link == "NO_ENCONTRE_EXACTO": info_sistema = "No encontré el nombre exacto."
@@ -102,20 +99,31 @@ def recibir_mensajes():
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
-                    info_sistema = f"Hora: {obtener_hora_chile()}. Dirección: Santo Domingo 240, Puente Alto."
+                    # AQUÍ CORREGIMOS EL HORARIO 17:30
+                    info_sistema = f"""
+                    Hora Actual: {obtener_hora_chile()}.
+                    Dirección: Santo Domingo 240, Puente Alto.
+                    Horario Real: Lunes a Viernes hasta las 17:30. Sábados hasta las 14:30.
+                    """
 
-                # 3. RESPONDER
+                # 3. RESPONDER (CON LIMPIEZA DE FORMATO)
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 identidad = db.obtener_identidad()
                 
                 prompt_final = f"""
                 Eres GlamBot.
                 
-                VITRINA ACTUAL: {identidad}
+                VITRINA: {identidad}
                 
-                REGLAS:
+                REGLAS DE FORMATO (IMPORTANTE):
+                1. NUNCA escribas "Bot:" al inicio.
+                2. NUNCA uses comillas " para encerrar tu respuesta.
+                3. Responde directamente al cliente.
+                
+                REGLAS NEGOCIO:
                 1. NO VENDEMOS ROPA.
-                2. {saludo}.
+                2. Horario: Cierre 17:30 (Lun-Vie) y 14:30 (Sab).
+                3. {saludo}.
                 
                 DATA: {info_sistema}
                 
@@ -126,6 +134,12 @@ def recibir_mensajes():
                 try:
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
+                    
+                    # --- FILTRO FINAL DE LIMPIEZA (LA ASPIRADORA) ---
+                    # Esto borra el "Bot:" si la IA es porfiada y lo pone igual
+                    respuesta = respuesta.replace("Bot:", "").replace("GlamBot:", "").strip()
+                    if respuesta.startswith('"') and respuesta.endswith('"'):
+                        respuesta = respuesta[1:-1] # Quita comillas extra
                     
                     usuario['historial'].append({"rol": nombre, "txt": texto})
                     usuario['historial'].append({"rol": "Bot", "txt": respuesta})
