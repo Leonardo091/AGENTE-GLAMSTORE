@@ -15,7 +15,7 @@ class GlamStoreDB:
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
-        # Carga silenciosa en segundo plano
+        # Iniciamos hilo silencioso
         hilo = threading.Thread(target=self._sincronizar_loop)
         hilo.daemon = True
         hilo.start()
@@ -24,7 +24,7 @@ class GlamStoreDB:
         while True:
             try: self._cargar_masivo()
             except: pass
-            time.sleep(600)
+            time.sleep(600) # Descansa 10 minutos entre cargas completas
 
     def _cargar_masivo(self):
         if not self.shopify_token or not self.shopify_url: return
@@ -34,33 +34,50 @@ class GlamStoreDB:
         params = {"status": "active", "limit": 250}
         
         acumulado = []
+        
+        logging.info("⏳ DB: Iniciando carga suave en segundo plano...")
+        
         while url:
             try:
-                r = requests.get(url, headers=headers, params=params, timeout=30)
+                # --- AQUÍ ESTÁ EL TRUCO: PAUSA PARA RESPIRAR ---
+                # Dormimos 2 segundos entre paginas para no saturar la CPU
+                # y dejar que WhatsApp funcione fluido.
+                time.sleep(2) 
+                
+                r = requests.get(url, headers=headers, params=params, timeout=20)
                 if r.status_code != 200: break
+                
                 data = r.json().get("products", [])
                 for p in data:
-                    price = float(p["variants"][0]["price"]) if p["variants"] else 0
-                    acumulado.append({"id": p["id"], "title": p["title"], "price": price})
-                if 'next' in r.links: url = r.links['next']['url']; params = {}
-                else: url = None
+                    try:
+                        price = float(p["variants"][0]["price"]) if p["variants"] else 0
+                        acumulado.append({"id": p["id"], "title": p["title"], "price": price})
+                    except: pass
+                
+                logging.info(f"📦 Bajados {len(data)} items... (Respirando)")
+
+                if 'next' in r.links: 
+                    url = r.links['next']['url']
+                    params = {}
+                else: 
+                    url = None
             except: break
         
         if acumulado:
             self.productos = acumulado
             self.total_items = len(acumulado)
             self.identidad = f"Catálogo cargado: {self.total_items} productos."
+            logging.info("✅ DB: Carga completa finalizada.")
 
     def buscar_producto_rapido(self, consulta):
-        """Busca en RAM o en Shopify. Si no hay nada, devuelve VACIO."""
         consulta = consulta.lower()
         
-        # 1. Búsqueda en RAM
+        # 1. RAM (Si ya cargó)
         if self.productos:
             encontrados = [p for p in self.productos if consulta in p['title'].lower()]
             if encontrados: return {"tipo": "EXACTO", "items": encontrados[:5]}
 
-        # 2. Búsqueda en Shopify (Si RAM falla o está vacía)
+        # 2. SHOPIFY LIVE (Respaldo)
         return self._buscar_en_shopify_live(consulta)
 
     def _buscar_en_shopify_live(self, query):
@@ -69,6 +86,7 @@ class GlamStoreDB:
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
         
         try:
+            # Timeout corto (5s) para no pegar el chat si Shopify está lento
             r = requests.get(f"https://{clean_url}/admin/api/2024-01/products.json", 
                              headers=headers, params={"title": query, "status": "active", "limit": 5}, timeout=5)
             if r.status_code == 200:
@@ -83,7 +101,7 @@ class GlamStoreDB:
         return {"tipo": "VACIO", "items": []}
 
     def obtener_identidad(self):
-        if self.total_items == 0: return "Tienda de Belleza (Buscando en Shopify...)"
+        if self.total_items == 0: return "Tienda de Belleza (Modo Respaldo Activo)"
         return self.identidad
 
     def crear_link_pago_seguro(self, nombre_producto):
