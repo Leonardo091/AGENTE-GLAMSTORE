@@ -7,9 +7,10 @@ from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
 
-# Traemos el cerebro desde database.py
+# --- IMPORTAMOS LA BASE DE DATOS (Cerebro) ---
 from database import db 
 
+# Configuración
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
@@ -34,17 +35,53 @@ hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
 hilo_ping.start()
 
+# --- RUTA HOME (PANEL DE CONTROL VISUAL) ---
 @app.route("/")
 def home():
-    return f"🤖 GLAMBOT v30 (FORMATO LIMPIO)<br>Identidad: {db.obtener_identidad()}", 200
+    # Pedimos datos a la DB
+    lista = db.productos
+    total = db.total_items
+    identidad = db.obtener_identidad()
+    hora = obtener_hora_chile()
+    
+    # Creamos lista HTML (Adaptada a versión Lite)
+    html_items = ""
+    for p in lista:
+        # AQUI ESTÁ EL CAMBIO: Usamos 'price' directo
+        try: precio = float(p['price'])
+        except: precio = 0
+        html_items += f"<li style='margin-bottom: 5px;'>🛒 <b>{p['title']}</b> - ${precio:,.0f}</li>"
 
-# Gemini
+    return f"""
+    <html>
+        <head>
+            <title>Panel GlamBot 🧠</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 20px; background: #f4f4f9; }}
+                .card {{ background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                h1 {{ color: #d63384; }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>🤖 Cerebro de GlamBot v31</h1>
+                <p><b>🕒 Hora:</b> {hora} | <b>📦 Productos en RAM:</b> {total}</p>
+                <p><b>👀 Identidad:</b> {identidad}</p>
+                <hr>
+                <ul>{html_items}</ul>
+            </div>
+        </body>
+    </html>
+    """, 200
+
+# --- CONFIGURACIÓN GEMINI ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except: model = genai.GenerativeModel('gemini-1.5-flash')
 
+# --- WEBHOOK (WHATSAPP) ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -59,7 +96,7 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # Memoria
+            # Gestión de Memoria
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
@@ -83,7 +120,7 @@ def recibir_mensajes():
 
                 info_sistema = ""
 
-                # 2. EJECUTAR
+                # 2. EJECUTAR (Lógica del Negocio)
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
                     if link == "NO_ENCONTRE_EXACTO": info_sistema = "No encontré el nombre exacto."
@@ -95,18 +132,22 @@ def recibir_mensajes():
                     if res["tipo"] == "VACIO": info_sistema = "Sin coincidencias."
                     else:
                         titulo = "ENCONTRÉ:" if res["tipo"] == "EXACTO" else "RECOMIENDO:"
-                        items = "".join([f"\n🔹 {p['title']} (${float(p['variants'][0]['price']):,.0f})" for p in res["items"]])
+                        # AQUI ESTÁ EL CAMBIO: Usamos p['price'] directo
+                        items = ""
+                        for p in res["items"]:
+                            try: prec = float(p['price'])
+                            except: prec = 0
+                            items += f"\n🔹 {p['title']} (${prec:,.0f})"
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
-                    # AQUÍ CORREGIMOS EL HORARIO 17:30
                     info_sistema = f"""
-                    Hora Actual: {obtener_hora_chile()}.
+                    Hora: {obtener_hora_chile()}.
                     Dirección: Santo Domingo 240, Puente Alto.
-                    Horario Real: Lunes a Viernes hasta las 17:30. Sábados hasta las 14:30.
+                    Horario: Lun-Vie hasta 17:30, Sab hasta 14:30.
                     """
 
-                # 3. RESPONDER (CON LIMPIEZA DE FORMATO)
+                # 3. RESPONDER (Con limpieza de formato)
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 identidad = db.obtener_identidad()
                 
@@ -115,17 +156,15 @@ def recibir_mensajes():
                 
                 VITRINA: {identidad}
                 
-                REGLAS DE FORMATO (IMPORTANTE):
-                1. NUNCA escribas "Bot:" al inicio.
-                2. NUNCA uses comillas " para encerrar tu respuesta.
-                3. Responde directamente al cliente.
+                REGLAS FORMATO:
+                1. NUNCA escribas "Bot:" ni uses comillas.
+                2. Sé directo y amable.
                 
                 REGLAS NEGOCIO:
                 1. NO VENDEMOS ROPA.
-                2. Horario: Cierre 17:30 (Lun-Vie) y 14:30 (Sab).
-                3. {saludo}.
+                2. {saludo}.
                 
-                DATA: {info_sistema}
+                DATA SISTEMA: {info_sistema}
                 
                 Chat: {historial_txt}
                 Cliente: "{texto}"
@@ -135,11 +174,10 @@ def recibir_mensajes():
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
                     
-                    # --- FILTRO FINAL DE LIMPIEZA (LA ASPIRADORA) ---
-                    # Esto borra el "Bot:" si la IA es porfiada y lo pone igual
+                    # Filtro de limpieza (La Aspiradora)
                     respuesta = respuesta.replace("Bot:", "").replace("GlamBot:", "").strip()
                     if respuesta.startswith('"') and respuesta.endswith('"'):
-                        respuesta = respuesta[1:-1] # Quita comillas extra
+                        respuesta = respuesta[1:-1]
                     
                     usuario['historial'].append({"rol": nombre, "txt": texto})
                     usuario['historial'].append({"rol": "Bot", "txt": respuesta})
