@@ -6,7 +6,6 @@ import os
 import logging
 from datetime import datetime, timedelta
 
-# Configuración de logs
 logging.basicConfig(level=logging.INFO)
 
 class GlamStoreDB:
@@ -15,7 +14,6 @@ class GlamStoreDB:
         self.total_items = 0
         self.identidad = "Cargando..."
         self.ultimo_update = "Nunca"
-        # Credenciales
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
@@ -25,10 +23,9 @@ class GlamStoreDB:
         hilo.start()
 
     def _sincronizar_loop(self):
-        """Actualiza el stock cada 10 min (para no saturar con 600 productos)"""
         while True:
             self._cargar_desde_shopify()
-            time.sleep(600) 
+            time.sleep(600) # 10 minutos
 
     def _cargar_desde_shopify(self):
         if not self.shopify_token or not self.shopify_url:
@@ -36,61 +33,70 @@ class GlamStoreDB:
             return
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
-        # URL inicial
         url = f"https://{clean_url}/admin/api/2024-01/products.json"
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
-        # Pedimos el máximo por página (250)
         params = {"status": "active", "limit": 250}
         
-        acumulado_productos = []
+        acumulado_lite = [] # Aquí guardaremos solo lo importante
         
         try:
-            logging.info("⏳ DB: Iniciando descarga masiva de catálogo...")
+            logging.info("⏳ DB: Iniciando descarga masiva OPTIMIZADA...")
             
-            # --- BUCLE DE PAGINACIÓN (Aquí está la magia) ---
             while url:
                 r = requests.get(url, headers=headers, params=params, timeout=20)
+                if r.status_code != 200: break
                 
-                if r.status_code != 200:
-                    logging.error(f"❌ DB: Error Shopify {r.status_code}")
-                    break
+                raw_data = r.json().get("products", [])
                 
-                data = r.json().get("products", [])
-                acumulado_productos.extend(data)
-                logging.info(f"📦 Página cargada... Van {len(acumulado_productos)} productos.")
+                # --- LA DIETA (OPTIMIZACIÓN DE RAM) ---
+                for p in raw_data:
+                    try:
+                        # Solo guardamos lo vital. El resto a la basura.
+                        item_lite = {
+                            "id": p["id"],
+                            "title": p["title"],
+                            "tags": p.get("tags", ""),
+                            # Guardamos el precio listo para no calcularlo cada vez
+                            "price": float(p["variants"][0]["price"]),
+                            "variant_id": p["variants"][0]["id"]
+                        }
+                        acumulado_lite.append(item_lite)
+                    except: pass # Si un producto está roto, lo saltamos
 
-                # ¿Hay página siguiente? (Link Header)
+                logging.info(f"📦 Procesados {len(acumulado_lite)} productos (Modo Liviano)...")
+
                 if 'next' in r.links:
                     url = r.links['next']['url']
-                    params = {} # La URL nueva ya trae los parámetros necesarios
+                    params = {}
                 else:
-                    url = None # No hay más páginas, rompemos el ciclo
+                    url = None
 
-            # Guardamos el total acumulado
-            self.productos = acumulado_productos
+            # Guardamos la lista liviana
+            self.productos = acumulado_lite
             self.total_items = len(self.productos)
             self.ultimo_update = (datetime.utcnow() - timedelta(hours=3)).strftime("%H:%M")
             
             if self.productos:
-                nombres = [p['title'] for p in self.productos[:8]]
+                # Actualizamos identidad
+                nombres = [p['title'] for p in self.productos[:10]]
                 self.identidad = f"Vitrina: {', '.join(nombres)}..."
             
-            logging.info(f"✅ DB: CARGA TOTAL EXITOSA. {self.total_items} productos listos para vender.")
+            logging.info(f"✅ DB: CARGA TOTAL EXITOSA. {self.total_items} productos en memoria (Optimizado).")
 
         except Exception as e:
             logging.error(f"❌ DB: Error conexión: {e}")
 
-    # --- FUNCIONES PÚBLICAS ---
+    # --- FUNCIONES PÚBLICAS (ADAPTADAS A LA VERSIÓN LITE) ---
 
     def buscar_producto_rapido(self, consulta):
-        """Busca en RAM"""
         if not self.productos: return {"tipo": "VACIO", "items": []}
         
         consulta = consulta.lower()
         encontrados = []
         
         for p in self.productos:
-            full_text = f"{p['title']} {p.get('tags','')} {p.get('product_type','')}".lower()
+            # Buscamos solo en título y tags (es más rápido)
+            full_text = f"{p['title']} {p['tags']}".lower()
             if consulta in full_text:
                 encontrados.append(p)
         
@@ -103,7 +109,8 @@ class GlamStoreDB:
         return self.identidad
 
     def crear_link_pago_seguro(self, nombre_producto):
-        """Va a Shopify en vivo"""
+        # Esta función sigue yendo a Shopify en vivo por seguridad
+        # No cambia porque usa requests, no la memoria RAM
         if not self.shopify_token: return "ERROR_CREDS"
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
@@ -122,5 +129,4 @@ class GlamStoreDB:
             return r2.json().get("draft_order", {}).get("invoice_url")
         return "ERROR_LINK"
 
-# INSTANCIA GLOBAL
 db = GlamStoreDB()
