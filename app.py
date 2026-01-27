@@ -4,7 +4,7 @@ import threading
 import time
 import requests
 import random
-from datetime import datetime, timedelta # <--- IMPORTANTE PARA LA HORA
+from datetime import datetime, timedelta # IMPORTANTE: Para la hora
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
@@ -21,35 +21,46 @@ SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 MI_PROPIA_URL = "https://agente-glamstore.onrender.com" 
 
-# --- 2. DATOS FIJOS (SIN CORCHETES PARA QUE NO SE CONFUNDA) ---
-DIRECCION_REAL = "Santo Domingo 240, Puente Alto (Interior Sandro's Collection)"
-HORARIOS_REAL = "Lunes a Viernes 10:00 a 17:30 y Sábados 10:00 a 14:30"
-WEB_REAL = "www.glamstorechile.cl"
-MAYORISTA_TEXTO = "Contamos con precio detalle y precios mayoristas por volumen (surtido)."
+# --- 2. LA VERDAD ABSOLUTA (NO MODIFICAR) ---
 
-# --- 3. FUNCIÓN DE HORA CHILENA 🇨🇱 ---
+# Texto Mayorista (Tu redacción exacta)
+TEXTO_MAYORISTA_FIJO = """
+Mire, contamos con un servicio de precio al detalle, pero si usted está buscando comprar por volumen, 
+podemos ofrecerle precios mayoristas dependiendo de los artículos que quiera consultar y de sus respectivas cantidades (puede ser surtido igualmente).
+"""
+
+# Info Tienda
+DIRECCION = "Santo Domingo 240, Puente Alto (Interior Sandro's Collection)"
+HORARIOS_TXT = "Lunes a Viernes 10:00-17:30 | Sábados 10:00-14:30"
+WEB = "www.glamstorechile.cl"
+
+# --- 3. LÓGICA DE TIEMPO REAL (HORA CHILE) ---
 def obtener_estado_tienda():
-    # Calculamos hora Chile (UTC-3 aprox por horario verano, ajusta si cambia)
+    # Ajuste manual UTC-3 (Horario Verano Chile)
+    # Si cambia la hora en invierno, cambiar a -4
     ahora_utc = datetime.utcnow()
     ahora_chile = ahora_utc - timedelta(hours=3) 
     
     dia = ahora_chile.weekday() # 0=Lunes, 6=Domingo
     hora = ahora_chile.hour
     minuto = ahora_chile.minute
-    hora_actual_str = f"{hora}:{minuto:02d}"
+    
+    hora_str = f"{hora:02d}:{minuto:02d}"
     
     esta_abierto = False
     
-    # Lógica Horario
-    if 0 <= dia <= 4: # Lunes a Viernes
-        if 10 <= hora < 17 or (hora == 17 and minuto <= 30):
-            esta_abierto = True
-    elif dia == 5: # Sábado
-        if 10 <= hora < 14 or (hora == 14 and minuto <= 30):
-            esta_abierto = True
+    # Lógica Lunes a Viernes (10:00 a 17:30)
+    if 0 <= dia <= 4: 
+        if 10 <= hora < 17: esta_abierto = True
+        elif hora == 17 and minuto <= 30: esta_abierto = True
+    
+    # Lógica Sábado (10:00 a 14:30)
+    elif dia == 5:
+        if 10 <= hora < 14: esta_abierto = True
+        elif hora == 14 and minuto <= 30: esta_abierto = True
             
-    estado = "ABIERTO AHORA ✅" if esta_abierto else "CERRADO AHORA 🌙"
-    return estado, hora_actual_str
+    estado = "ABIERTO ✅" if esta_abierto else "CERRADO 🌙"
+    return estado, hora_str
 
 # --- 4. MEMORIA ---
 MEMORIA_USUARIOS = {} 
@@ -65,7 +76,7 @@ hilo.daemon = True
 hilo.start()
 
 @app.route("/")
-def home(): return "🤖 GLAMBOT v23 CON RELOJ", 200
+def home(): return "🤖 GLAMBOT v23 ANTI-ALUCINACION", 200
 
 # --- 5. GEMINI ---
 model = None
@@ -100,7 +111,7 @@ def consultar_catalogo(busqueda):
     url = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/products.json"
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    es_general = any(x in busqueda.lower() for x in ["perfume", "catalogo", "todo", "lista"])
+    es_general = any(x in busqueda.lower() for x in ["perfume", "catalogo", "todo", "lista", "productos"])
     params = {"status": "active", "limit": 50} if es_general else {"title": busqueda, "status": "active", "limit": 20}
     
     try:
@@ -108,7 +119,6 @@ def consultar_catalogo(busqueda):
         prods = r.json().get("products", [])
         if not prods: return "NO_HAY_STOCK"
         
-        # Shuffle
         seleccion = random.sample(prods, min(len(prods), 5))
         txt = "📦 OPCIONES:\n"
         for p in seleccion:
@@ -134,7 +144,7 @@ def recibir_mensajes():
 
             # MEMORIA & HORA
             ahora_ts = time.time()
-            estado_tienda, hora_actual = obtener_estado_tienda() # <--- HORA REAL
+            estado_tienda, hora_actual = obtener_estado_tienda() # <--- HORA CHILENA REAL
             
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=10), 'ultimo_msg': 0, 'carrito': []}
@@ -157,10 +167,11 @@ def recibir_mensajes():
                 Mensaje: "{texto}"
                 Historial: {historial_txt}
                 Clasifica en UNO:
-                - CARRITO_AGREGAR: (Si quiere comprar producto específico)
-                - CARRITO_PAGAR: (Si pide link, total, pagar)
+                - CARRITO_AGREGAR: (Comprar producto específico)
+                - CARRITO_PAGAR: (Pide link, total)
                 - PREGUNTA_TIENDA: (Ubicación, horario, si está abierto)
                 - PREGUNTA_PRODUCTO: (Stock, catalogo)
+                - PREGUNTA_MAYORISTA: (Precios por mayor, por volumen)
                 - CHARLA: (Saludos)
                 """
                 try: decision = model.generate_content(prompt_det).text.strip().split(":")[0]
@@ -170,19 +181,18 @@ def recibir_mensajes():
                 
                 # 2. ACCIONES
                 if "CARRITO_AGREGAR" in decision:
-                    # Intentamos sacar el nombre del producto del texto
-                    info_sistema = f"Busca el producto en Shopify. Si existe, agrégalo mentalmente."
-                    prod = buscar_producto_shopify(texto) # Búsqueda simple
+                    info_sistema = f"Busca producto en Shopify."
+                    prod = buscar_producto_shopify(texto)
                     if prod:
                         usuario['carrito'].append(prod)
-                        info_sistema = f"✅ AGREGADO: {prod['title']}. Total items: {len(usuario['carrito'])}. PREGUNTA SI QUIERE ALGO MÁS."
+                        info_sistema = f"✅ AGREGADO: {prod['title']}. Total items: {len(usuario['carrito'])}. Pregunta si quiere algo más."
                     else:
-                        info_sistema = "❌ No encontré ese producto exacto. Pide el nombre bien escrito."
+                        info_sistema = "❌ No encontré ese producto exacto."
 
                 elif "CARRITO_PAGAR" in decision:
                     if usuario['carrito']:
                         link = crear_carrito_shopify(usuario['carrito'])
-                        info_sistema = f"✅ LINK CREADO: {link}. Entrégalo al cliente."
+                        info_sistema = f"✅ LINK CREADO: {link}."
                         usuario['carrito'] = []
                     else:
                         info_sistema = "El carrito está vacío."
@@ -190,33 +200,40 @@ def recibir_mensajes():
                 elif "PREGUNTA_PRODUCTO" in decision:
                     info_sistema = consultar_catalogo(texto)
 
+                elif "PREGUNTA_MAYORISTA" in decision:
+                    # FORZAMOS EL TEXTO EXACTO
+                    info_sistema = f"RESPONDE EXACTAMENTE ESTO: {TEXTO_MAYORISTA_FIJO}"
+
                 elif "PREGUNTA_TIENDA" in decision:
-                    # AQUÍ LE PASAMOS LA HORA REAL AL CEREBRO
                     info_sistema = f"""
                     DATOS REALES:
-                    - Estado Actual Tienda: {estado_tienda} (Son las {hora_actual}).
-                    - Dirección: {DIRECCION_REAL}.
-                    - Horario Fijo: {HORARIOS_REAL}.
-                    - Web: {WEB_REAL}.
+                    - Hora Actual Chile: {hora_actual}
+                    - Estado Tienda: {estado_tienda}
+                    - Dirección: {DIRECCION}
+                    - Horario: {HORARIOS_TXT}
                     """
 
-                # 3. GENERADOR DE RESPUESTA
-                instruccion_saludo = "Saluda formal" if debe_saludar else "NO SALUDES"
+                # 3. GENERADOR DE RESPUESTA (REGLAS ANTI-ALUCINACIÓN)
+                instruccion_saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 
                 prompt_final = f"""
-                Eres GlamBot.
+                Eres GlamBot de Glamstore Chile.
+                
+                IDENTIDAD (LEER ATENTAMENTE):
+                1. SOMOS UNA PERFUMERÍA Y TIENDA DE BELLEZA.
+                2. NO VENDEMOS ROPA, NI PRENDAS, NI POLERAS. (Si el cliente pregunta, aclara que "Sandro's Collection" es solo el nombre del local donde estamos, pero nosotros vendemos perfumes).
+                3. SÍ VENDEMOS POR WHATSAPP.
                 
                 SITUACIÓN ACTUAL:
-                - Hora en Chile: {hora_actual}
-                - Estado Tienda: {estado_tienda} (Si dice CERRADO, avisa que no pueden ir al local ahora, pero sí comprar web).
+                - Hora Chile: {hora_actual}. Estado: {estado_tienda}.
+                - Si dice CERRADO y el cliente pregunta si puede ir, dile que NO vaya al local, pero que compre en la web.
                 
                 INFO SISTEMA: {info_sistema}
                 
-                TUS REGLAS:
+                INSTRUCCIONES:
                 1. {instruccion_saludo}.
-                2. SÍ VENDEMOS POR WHATSAPP. Si el cliente quiere comprar, toma el pedido. JAMÁS digas que no gestionamos pedidos.
-                3. Si preguntan dirección, da la de Puente Alto ({DIRECCION_REAL}). NO USES CORCHETES [].
-                4. Sé amable (Usted).
+                2. Si el sistema te dio el TEXTO MAYORISTA, úsalo tal cual. NO INVENTES REGLAS DE "6 PRENDAS". ESO ES MENTIRA.
+                3. Sé amable y usa emojis.
                 
                 Historial: {historial_txt}
                 Cliente: "{texto}"
