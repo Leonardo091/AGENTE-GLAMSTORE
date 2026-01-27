@@ -6,14 +6,11 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
-
-# Importamos la base de datos
 from database import db 
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# Credenciales
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
@@ -34,8 +31,6 @@ hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
 hilo_ping.start()
 
-# --- RUTA HOME (MODO JSON ULTRALIGERO) ---
-# Esto soluciona el problema de que la página no cargue
 @app.route("/")
 def home():
     try:
@@ -43,25 +38,24 @@ def home():
         identidad = db.obtener_identidad()
         hora = obtener_hora_chile()
         
-        # Muestra pequeña de 5 productos
         muestra = []
-        for p in db.productos[:5]:
-            muestra.append({
-                "producto": p['title'],
-                "precio": p['price']
-            })
+        # Try/Except por si la lista está vacía o algo falla
+        try:
+            for p in db.productos[:5]:
+                muestra.append({"producto": p['title'], "precio": p['price']})
+        except: pass
             
         return jsonify({
             "estado": "ONLINE 🟢",
-            "hora_servidor": hora,
-            "total_productos_ram": total,
-            "identidad": identidad,
-            "ejemplo_catalogo": muestra
+            "hora": hora,
+            "productos_cargados": total,
+            "identidad_sistema": identidad,
+            "muestra": muestra
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Configuración Gemini
+# Gemini
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
@@ -82,7 +76,6 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # Memoria Chat
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
@@ -99,7 +92,7 @@ def recibir_mensajes():
                 prompt_det = f"""
                 Mensaje: "{texto}"
                 Historial: {historial_txt}
-                Acción: VENDER, BUSCAR, INFO, CHARLA.
+                Responde SOLO UNA PALABRA: VENDER, BUSCAR, INFO, CHARLA.
                 """
                 try: decision = model.generate_content(prompt_det).text.strip().split()[0]
                 except: decision = "CHARLA"
@@ -115,41 +108,44 @@ def recibir_mensajes():
 
                 elif "BUSCAR" in decision:
                     res = db.buscar_producto_rapido(texto)
-                    if res["tipo"] == "VACIO": info_sistema = "Sin coincidencias."
+                    if res["tipo"] == "VACIO": 
+                        # MENTIRA PIADOSA: Si la DB está en 0, no decimos "vacío", decimos que no encontramos coincidencia
+                        info_sistema = "No encontré coincidencias exactas en el catálogo actual."
                     else:
                         titulo = "ENCONTRÉ:" if res["tipo"] == "EXACTO" else "RECOMIENDO:"
                         items = ""
                         for p in res["items"]:
-                            # Precio ya viene limpio desde database.py
                             items += f"\n🔹 {p['title']} (${p['price']:,.0f})"
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
                     info_sistema = f"""
-                    Hora: {obtener_hora_chile()}.
-                    Dirección: Santo Domingo 240, Puente Alto.
-                    Horario: Lun-Vie hasta 17:30, Sab hasta 14:30.
+                    Ubicación: Santo Domingo 240, Puente Alto.
+                    Horario: Lun-Vie 10:00-19:00, Sab 10:00-14:00.
                     """
 
-                # 3. RESPONDER
+                # 3. RESPONDER (PROMPT ANTIBOT-FEO)
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 identidad = db.obtener_identidad()
                 
                 prompt_final = f"""
-                Eres GlamBot.
+                Eres GlamBot, asistente de la tienda Glamstore Chile.
                 
-                VITRINA: {identidad}
+                CONTEXTO TIENDA:
+                {identidad}
                 
-                REGLAS FORMATO:
-                1. NUNCA escribas "Bot:" ni uses comillas.
+                INFORMACIÓN RELEVANTE PARA EL CLIENTE:
+                {info_sistema}
                 
-                REGLAS NEGOCIO:
-                1. NO VENDEMOS ROPA.
-                2. {saludo}.
+                INSTRUCCIONES DE TONO (ESTRICTO):
+                1. JAMÁS empieces con frases como "Cargando datos...", "Procesando...", "Según la información...".
+                2. JAMÁS escribas "Bot:" o uses comillas.
+                3. Responde DIRECTAMENTE a la pregunta.
+                4. NO VENDEMOS ROPA.
+                5. {saludo}.
                 
-                DATA SISTEMA: {info_sistema}
-                
-                Chat: {historial_txt}
+                Chat previo:
+                {historial_txt}
                 Cliente: "{texto}"
                 """
                 
@@ -157,8 +153,9 @@ def recibir_mensajes():
                     res = model.generate_content(prompt_final)
                     respuesta = res.text
                     
-                    # Limpieza final (La Aspiradora)
+                    # Limpieza final
                     respuesta = respuesta.replace("Bot:", "").replace("GlamBot:", "").strip()
+                    respuesta = respuesta.replace("Cargando datos...", "") # Filtro de emergencia
                     if respuesta.startswith('"') and respuesta.endswith('"'):
                         respuesta = respuesta[1:-1]
                     
