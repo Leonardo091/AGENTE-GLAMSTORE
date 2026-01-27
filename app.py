@@ -4,7 +4,7 @@ import threading
 import time
 import requests
 import random
-from datetime import datetime, timedelta # IMPORTANTE: Para la hora
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
@@ -21,48 +21,16 @@ SHOPIFY_TOKEN = os.environ.get("SHOPIFY_TOKEN")
 SHOPIFY_URL = os.environ.get("SHOPIFY_URL")
 MI_PROPIA_URL = "https://agente-glamstore.onrender.com" 
 
-# --- 2. LA VERDAD ABSOLUTA (NO MODIFICAR) ---
-
-# Texto Mayorista (Tu redacción exacta)
-TEXTO_MAYORISTA_FIJO = """
-Mire, contamos con un servicio de precio al detalle, pero si usted está buscando comprar por volumen, 
-podemos ofrecerle precios mayoristas dependiendo de los artículos que quiera consultar y de sus respectivas cantidades (puede ser surtido igualmente).
+# --- 2. DATOS FIJOS (SOLO UBICACIÓN, EL RESTO ES DINÁMICO) ---
+# Solo dejamos fijo lo que NO cambia en Shopify (Ubicación y Políticas)
+INFO_LOGISTICA = """
+📍 UBICACIÓN: Santo Domingo 240, Puente Alto (Interior Sandro's Collection).
+⚠️ NOTA: "Sandro's Collection" es solo el local donde estamos ubicados. NO vendemos su ropa.
+⏰ HORARIOS: Lunes a Viernes 10:00-17:30 | Sábados 10:00-14:30.
+💰 MAYORISTA: Contamos con precio detalle y precios mayoristas por volumen (surtido).
 """
 
-# Info Tienda
-DIRECCION = "Santo Domingo 240, Puente Alto (Interior Sandro's Collection)"
-HORARIOS_TXT = "Lunes a Viernes 10:00-17:30 | Sábados 10:00-14:30"
-WEB = "www.glamstorechile.cl"
-
-# --- 3. LÓGICA DE TIEMPO REAL (HORA CHILE) ---
-def obtener_estado_tienda():
-    # Ajuste manual UTC-3 (Horario Verano Chile)
-    # Si cambia la hora en invierno, cambiar a -4
-    ahora_utc = datetime.utcnow()
-    ahora_chile = ahora_utc - timedelta(hours=3) 
-    
-    dia = ahora_chile.weekday() # 0=Lunes, 6=Domingo
-    hora = ahora_chile.hour
-    minuto = ahora_chile.minute
-    
-    hora_str = f"{hora:02d}:{minuto:02d}"
-    
-    esta_abierto = False
-    
-    # Lógica Lunes a Viernes (10:00 a 17:30)
-    if 0 <= dia <= 4: 
-        if 10 <= hora < 17: esta_abierto = True
-        elif hora == 17 and minuto <= 30: esta_abierto = True
-    
-    # Lógica Sábado (10:00 a 14:30)
-    elif dia == 5:
-        if 10 <= hora < 14: esta_abierto = True
-        elif hora == 14 and minuto <= 30: esta_abierto = True
-            
-    estado = "ABIERTO ✅" if esta_abierto else "CERRADO 🌙"
-    return estado, hora_str
-
-# --- 4. MEMORIA ---
+# --- 3. MEMORIA & RELOJ ---
 MEMORIA_USUARIOS = {} 
 
 def despertar_al_bot():
@@ -75,59 +43,85 @@ hilo = threading.Thread(target=despertar_al_bot)
 hilo.daemon = True
 hilo.start()
 
-@app.route("/")
-def home(): return "🤖 GLAMBOT v23 ANTI-ALUCINACION", 200
+def obtener_hora_chile():
+    ahora_utc = datetime.utcnow()
+    ahora_chile = ahora_utc - timedelta(hours=3) # Ajustar -4 en invierno
+    return ahora_chile.strftime("%H:%M")
 
-# --- 5. GEMINI ---
+@app.route("/")
+def home(): return "🤖 GLAMBOT DINÁMICO v24", 200
+
+# --- 4. GEMINI ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
     try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except: model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 6. FUNCIONES SHOPIFY ---
-def buscar_producto_shopify(nombre):
+# --- 5. FUNCIONES SHOPIFY (EL CORAZÓN) ---
+
+def escanear_identidad_tienda():
+    """
+    Saca una muestra de productos para que la IA sepa qué vendemos.
+    No busca nada específico, solo 'olfatea' la tienda.
+    """
+    if not SHOPIFY_TOKEN: return "No hay conexión a Shopify."
+    url = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/products.json"
+    headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
+    
+    try:
+        # Traemos 10 productos recientes al azar para definir el rubro
+        r = requests.get(url, headers=headers, params={"status": "active", "limit": 15})
+        prods = r.json().get("products", [])
+        if not prods: return "Tienda vacía."
+        
+        # Creamos un resumen para la IA
+        nombres = [p['title'] for p in prods]
+        ejemplos = ", ".join(nombres[:8]) # Tomamos los primeros 8 para no saturar
+        return f"PRODUCTOS EN VITRINA (MUESTRA): {ejemplos}..."
+    except: return "Error leyendo catálogo."
+
+def buscar_producto_especifico(busqueda):
     if not SHOPIFY_TOKEN: return None
     url = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/products.json"
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    r = requests.get(url, headers=headers, params={"title": nombre, "status": "active", "limit": 1})
+    # 1. Búsqueda por nombre
+    r = requests.get(url, headers=headers, params={"title": busqueda, "status": "active", "limit": 5})
     prods = r.json().get("products", [])
-    if not prods: return None
-    v = prods[0]['variants'][0]
-    return {"id": v['id'], "title": prods[0]['title'], "price": float(v['price'])}
+    
+    if not prods:
+        # 2. Si falla, búsqueda general (Shuffle)
+        r2 = requests.get(url, headers=headers, params={"status": "active", "limit": 40})
+        todos = r2.json().get("products", [])
+        if not todos: return "NO_STOCK"
+        prods = random.sample(todos, min(len(todos), 5))
+        es_recomendacion = True
+    else:
+        es_recomendacion = False
 
-def crear_carrito_shopify(items):
-    if not SHOPIFY_TOKEN or not items: return None
-    url = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/draft_orders.json"
-    headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
-    payload = {"draft_order": {"line_items": [{"variant_id": i['id'], "quantity": 1} for i in items]}}
-    r = requests.post(url, headers=headers, json=payload)
-    if r.status_code == 201: return r.json().get("draft_order", {}).get("invoice_url")
-    return None
+    return {"items": prods, "es_recomendacion": es_recomendacion}
 
-def consultar_catalogo(busqueda):
+def crear_link_pago(nombre_producto):
+    # (Misma lógica de carrito simple)
     if not SHOPIFY_TOKEN: return ""
-    url = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/products.json"
+    url_prod = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/products.json"
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    es_general = any(x in busqueda.lower() for x in ["perfume", "catalogo", "todo", "lista", "productos"])
-    params = {"status": "active", "limit": 50} if es_general else {"title": busqueda, "status": "active", "limit": 20}
+    r = requests.get(url_prod, headers=headers, params={"title": nombre_producto, "status": "active", "limit": 1})
+    prods = r.json().get("products", [])
+    if not prods: return "NO_ENCONTRE_EXACTO"
     
-    try:
-        r = requests.get(url, headers=headers, params=params)
-        prods = r.json().get("products", [])
-        if not prods: return "NO_HAY_STOCK"
-        
-        seleccion = random.sample(prods, min(len(prods), 5))
-        txt = "📦 OPCIONES:\n"
-        for p in seleccion:
-            v = p['variants'][0]
-            txt += f"▪️ {p['title']} (${float(v['price']):,.0f})\n"
-        return txt
-    except: return ""
+    v = prods[0]['variants'][0]
+    # Creamos Draft Order
+    url_draft = f"https://{SHOPIFY_URL.replace('https://','')}/admin/api/2024-01/draft_orders.json"
+    payload = {"draft_order": {"line_items": [{"variant_id": v['id'], "quantity": 1}]}}
+    r2 = requests.post(url_draft, headers=headers, json=payload)
+    if r2.status_code == 201:
+        return f"✅ Link: {r2.json().get('draft_order', {}).get('invoice_url')}"
+    return "Error link"
 
-# --- 7. WEBHOOK ---
+# --- 6. WEBHOOK INTELIGENTE ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -142,98 +136,79 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
-            # MEMORIA & HORA
+            # MEMORIA
             ahora_ts = time.time()
-            estado_tienda, hora_actual = obtener_estado_tienda() # <--- HORA CHILENA REAL
-            
             if numero not in MEMORIA_USUARIOS:
-                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=10), 'ultimo_msg': 0, 'carrito': []}
-            
+                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=10), 'ultimo_msg': 0}
             usuario = MEMORIA_USUARIOS[numero]
             
-            # Saludo inteligente (2 horas)
-            debe_saludar = False
-            if (ahora_ts - usuario['ultimo_msg'] > 7200 and usuario['ultimo_msg'] != 0) or usuario['ultimo_msg'] == 0:
-                debe_saludar = True
-                usuario['carrito'] = [] 
-            if any(s in texto.lower() for s in ["hola", "buenas", "alo"]): debe_saludar = True
-            
+            # Saludo (2 horas)
+            debe_saludar = (ahora_ts - usuario['ultimo_msg'] > 7200) or (usuario['ultimo_msg'] == 0)
+            if any(s in texto.lower() for s in ["hola", "buenas"]): debe_saludar = True
             usuario['ultimo_msg'] = ahora_ts
+            
             historial_txt = "\n".join([f"- {h['rol']}: {h['txt']}" for h in usuario['historial']])
 
+            # --- IDENTIDAD DINÁMICA ---
+            # Aquí ocurre la magia: El bot mira qué hay en la tienda para saber quién es
+            contexto_productos = escanear_identidad_tienda()
+
             if model:
-                # 1. CLASIFICADOR
+                # 1. CLASIFICACIÓN
                 prompt_det = f"""
                 Mensaje: "{texto}"
                 Historial: {historial_txt}
-                Clasifica en UNO:
-                - CARRITO_AGREGAR: (Comprar producto específico)
-                - CARRITO_PAGAR: (Pide link, total)
-                - PREGUNTA_TIENDA: (Ubicación, horario, si está abierto)
-                - PREGUNTA_PRODUCTO: (Stock, catalogo)
-                - PREGUNTA_MAYORISTA: (Precios por mayor, por volumen)
-                - CHARLA: (Saludos)
+                Clasifica:
+                - VENDER_DIRECTO (Quiere link, pagar, comprar)
+                - CONSULTAR_CATALOGO (Pregunta qué tienen, perfumes, buscar producto)
+                - INFO_LOGISTICA (Ubicación, horario, mayorista)
+                - CHARLA
                 """
-                try: decision = model.generate_content(prompt_det).text.strip().split(":")[0]
+                try: decision = model.generate_content(prompt_det).text.strip().split()[0]
                 except: decision = "CHARLA"
 
                 info_sistema = ""
-                
-                # 2. ACCIONES
-                if "CARRITO_AGREGAR" in decision:
-                    info_sistema = f"Busca producto en Shopify."
-                    prod = buscar_producto_shopify(texto)
-                    if prod:
-                        usuario['carrito'].append(prod)
-                        info_sistema = f"✅ AGREGADO: {prod['title']}. Total items: {len(usuario['carrito'])}. Pregunta si quiere algo más."
+
+                # 2. DATOS
+                if "VENDER_DIRECTO" in decision:
+                    info_sistema = crear_link_pago(texto)
+                    if "NO_ENCONTRE" in info_sistema: info_sistema = "Pide el nombre exacto del producto."
+
+                elif "CONSULTAR_CATALOGO" in decision:
+                    resultado = buscar_producto_especifico(texto)
+                    if resultado == "NO_STOCK":
+                        info_sistema = "No hay productos. Manda a la web."
                     else:
-                        info_sistema = "❌ No encontré ese producto exacto."
+                        tipo_lista = "RESULTADOS EXACTOS" if not resultado['es_recomendacion'] else "RECOMENDACIONES (No exacto)"
+                        txt_prods = "\n".join([f"- {p['title']} (${float(p['variants'][0]['price']):,.0f})" for p in resultado['items']])
+                        info_sistema = f"{tipo_lista}:\n{txt_prods}"
 
-                elif "CARRITO_PAGAR" in decision:
-                    if usuario['carrito']:
-                        link = crear_carrito_shopify(usuario['carrito'])
-                        info_sistema = f"✅ LINK CREADO: {link}."
-                        usuario['carrito'] = []
-                    else:
-                        info_sistema = "El carrito está vacío."
+                elif "INFO_LOGISTICA" in decision:
+                    info_sistema = f"Hora actual: {obtener_hora_chile()}.\n{INFO_LOGISTICA}"
 
-                elif "PREGUNTA_PRODUCTO" in decision:
-                    info_sistema = consultar_catalogo(texto)
-
-                elif "PREGUNTA_MAYORISTA" in decision:
-                    # FORZAMOS EL TEXTO EXACTO
-                    info_sistema = f"RESPONDE EXACTAMENTE ESTO: {TEXTO_MAYORISTA_FIJO}"
-
-                elif "PREGUNTA_TIENDA" in decision:
-                    info_sistema = f"""
-                    DATOS REALES:
-                    - Hora Actual Chile: {hora_actual}
-                    - Estado Tienda: {estado_tienda}
-                    - Dirección: {DIRECCION}
-                    - Horario: {HORARIOS_TXT}
-                    """
-
-                # 3. GENERADOR DE RESPUESTA (REGLAS ANTI-ALUCINACIÓN)
+                # 3. GENERADOR DE RESPUESTA (AUTO-PERCEPCIÓN)
                 instruccion_saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 
                 prompt_final = f"""
-                Eres GlamBot de Glamstore Chile.
+                Eres el Asistente Inteligente de Glamstore Chile.
                 
-                IDENTIDAD (LEER ATENTAMENTE):
-                1. SOMOS UNA PERFUMERÍA Y TIENDA DE BELLEZA.
-                2. NO VENDEMOS ROPA, NI PRENDAS, NI POLERAS. (Si el cliente pregunta, aclara que "Sandro's Collection" es solo el nombre del local donde estamos, pero nosotros vendemos perfumes).
-                3. SÍ VENDEMOS POR WHATSAPP.
-                
-                SITUACIÓN ACTUAL:
-                - Hora Chile: {hora_actual}. Estado: {estado_tienda}.
-                - Si dice CERRADO y el cliente pregunta si puede ir, dile que NO vaya al local, pero que compre en la web.
-                
-                INFO SISTEMA: {info_sistema}
+                AUTO-ANÁLISIS DE IDENTIDAD (IMPORTANTE):
+                Mira los productos que acabas de escanear en Shopify:
+                [{contexto_productos}]
                 
                 INSTRUCCIONES:
-                1. {instruccion_saludo}.
-                2. Si el sistema te dio el TEXTO MAYORISTA, úsalo tal cual. NO INVENTES REGLAS DE "6 PRENDAS". ESO ES MENTIRA.
-                3. Sé amable y usa emojis.
+                1. BASADO EN LA LISTA DE ARRIBA, define qué tipo de tienda eres. 
+                   - Si ves perfumes -> Eres Perfumería.
+                   - Si ves maquillaje -> Eres Tienda de Belleza.
+                   - Si ves ambos -> Eres Tienda de Perfumería y Cosmética.
+                   - NO DIGAS QUE VENDES ROPA (Aunque la dirección diga Sandro's Collection).
+                
+                2. Si el cliente pregunta "¿Qué venden?", responde basándote ÚNICAMENTE en los productos que ves en el escaneo de arriba.
+                
+                3. {instruccion_saludo}. Sé amable y usa emojis.
+                
+                INFO PARA RESPONDER AHORA:
+                {info_sistema}
                 
                 Historial: {historial_txt}
                 Cliente: "{texto}"
