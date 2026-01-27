@@ -1,133 +1,89 @@
 import threading
 import time
 import requests
-import random
 import os
 import logging
 from datetime import datetime, timedelta
 
-# Configuración de logs
-logging.basicConfig(level=logging.INFO)
+# Logs detallados para ver dónde se queda pegado
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] DIAGNOSTICO: %(message)s')
 
 class GlamStoreDB:
     def __init__(self):
         self.productos = []
         self.total_items = 0
-        self.identidad = "Cargando..."
-        self.ultimo_update = "Nunca"
-        self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
-        self.shopify_url = os.environ.get("SHOPIFY_URL")
+        self.identidad = "Modo Diagnóstico (Esperando conexión...)"
         
-        # Arrancamos el trabajador silencioso
-        hilo = threading.Thread(target=self._sincronizar_loop)
+        # 1. VERIFICAMOS CREDENCIALES AL ARRANCAR
+        self.token = os.environ.get("SHOPIFY_TOKEN")
+        self.url_tienda = os.environ.get("SHOPIFY_URL")
+        
+        if not self.token:
+            logging.error("⛔ FATAL: No existe la variable SHOPIFY_TOKEN en Render.")
+        if not self.url_tienda:
+            logging.error("⛔ FATAL: No existe la variable SHOPIFY_URL en Render.")
+
+        # Arrancamos hilo
+        hilo = threading.Thread(target=self._test_carga)
         hilo.daemon = True
         hilo.start()
 
-    def _sincronizar_loop(self):
-        """Actualiza el stock cada 10 min"""
-        while True:
-            self._cargar_desde_shopify()
-            time.sleep(600) 
-
-    def _cargar_desde_shopify(self):
-        if not self.shopify_token or not self.shopify_url:
-            logging.error("❌ DB: Faltan credenciales.")
+    def _test_carga(self):
+        """Intenta cargar SOLO 10 productos para probar conexión"""
+        time.sleep(5) # Esperamos 5 seg a que Flask arranque para no chocar
+        
+        logging.info("🚀 INICIANDO PRUEBA DE CONEXIÓN A SHOPIFY...")
+        
+        if not self.token or not self.url_tienda:
+            logging.error("❌ Cancelando: Faltan datos.")
             return
-        
-        clean_url = self.shopify_url.replace("https://", "").replace("/", "")
+
+        # Limpiamos URL
+        clean_url = self.url_tienda.replace("https://", "").replace("/", "")
         url = f"https://{clean_url}/admin/api/2024-01/products.json"
-        headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
-        # Pedimos el máximo por página
-        params = {"status": "active", "limit": 250}
         
-        acumulado_lite = [] 
+        logging.info(f"📡 Intentando conectar a: {url}")
+        
+        headers = {"X-Shopify-Access-Token": self.token, "Content-Type": "application/json"}
+        # PEDIMOS SOLO 10 PRODUCTOS
+        params = {"status": "active", "limit": 10} 
         
         try:
-            logging.info("⏳ DB: Iniciando descarga masiva OPTIMIZADA...")
+            r = requests.get(url, headers=headers, params=params, timeout=15)
             
-            while url:
-                r = requests.get(url, headers=headers, params=params, timeout=20)
-                if r.status_code != 200: break
+            if r.status_code == 200:
+                data = r.json().get("products", [])
+                cantidad = len(data)
+                logging.info(f"✅ CONEXIÓN EXITOSA. Shopify respondió con {cantidad} productos.")
                 
-                raw_data = r.json().get("products", [])
-                
-                # --- LA DIETA (Guardamos solo lo vital para ahorrar RAM) ---
-                for p in raw_data:
+                # Guardamos esos 10
+                temp_list = []
+                for p in data:
                     try:
-                        item_lite = {
-                            "id": p["id"],
-                            "title": p["title"],
-                            "tags": p.get("tags", ""),
-                            # Guardamos el precio ya limpio
-                            "price": float(p["variants"][0]["price"]),
-                            "variant_id": p["variants"][0]["id"]
-                        }
-                        acumulado_lite.append(item_lite)
-                    except: pass 
-
-                logging.info(f"📦 Procesados {len(acumulado_lite)} productos (Modo Liviano)...")
-
-                # Paginación: ¿Quedan más productos?
-                if 'next' in r.links:
-                    url = r.links['next']['url']
-                    params = {}
-                else:
-                    url = None
-
-            # Guardamos la lista final
-            self.productos = acumulado_lite
-            self.total_items = len(self.productos)
-            self.ultimo_update = (datetime.utcnow() - timedelta(hours=3)).strftime("%H:%M")
-            
-            if self.productos:
-                nombres = [p['title'] for p in self.productos[:10]]
-                self.identidad = f"Vitrina: {', '.join(nombres)}..."
-            
-            logging.info(f"✅ DB: ÉXITO TOTAL. {self.total_items} productos en memoria.")
-
+                        prec = float(p["variants"][0]["price"])
+                        temp_list.append({"title": p["title"], "price": prec, "id": p["id"]})
+                    except: pass
+                
+                self.productos = temp_list
+                self.total_items = len(temp_list)
+                self.identidad = "PRUEBA EXITOSA: Conexión establecida."
+                logging.info("🎉 BASE DE DATOS CARGADA CON MUESTRA DE 10 ITEMS.")
+                
+            elif r.status_code == 401:
+                logging.error("❌ ERROR 401: El Token es inválido (Revisa SHOPIFY_TOKEN).")
+            elif r.status_code == 403:
+                logging.error("❌ ERROR 403: Falta permiso 'read_products' (Reinstalar App en Shopify).")
+            elif r.status_code == 404:
+                logging.error("❌ ERROR 404: La URL de la tienda está mal escrita.")
+            else:
+                logging.error(f"❌ ERROR DESCONOCIDO: Código {r.status_code}")
+                
         except Exception as e:
-            logging.error(f"❌ DB: Error conexión: {e}")
+            logging.error(f"❌ ERROR DE RED CRÍTICO: {e}")
 
-    # --- FUNCIONES PÚBLICAS ---
+    # Funciones dummy para que app.py no falle
+    def buscar_producto_rapido(self, q): return {"tipo": "VACIO", "items": []}
+    def obtener_identidad(self): return self.identidad
+    def crear_link_pago_seguro(self, n): return "Modo Prueba"
 
-    def buscar_producto_rapido(self, consulta):
-        if not self.productos: return {"tipo": "VACIO", "items": []}
-        
-        consulta = consulta.lower()
-        encontrados = []
-        
-        for p in self.productos:
-            full_text = f"{p['title']} {p['tags']}".lower()
-            if consulta in full_text:
-                encontrados.append(p)
-        
-        if not encontrados:
-            return {"tipo": "RECOMENDACION", "items": random.sample(self.productos, min(5, len(self.productos)))}
-            
-        return {"tipo": "EXACTO", "items": encontrados[:5]}
-
-    def obtener_identidad(self):
-        return self.identidad
-
-    def crear_link_pago_seguro(self, nombre_producto):
-        # Esta función va a Shopify en vivo (Seguridad de cobro)
-        if not self.shopify_token: return "ERROR_CREDS"
-        
-        clean_url = self.shopify_url.replace("https://", "").replace("/", "")
-        headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
-        
-        r = requests.get(f"https://{clean_url}/admin/api/2024-01/products.json", 
-                         headers=headers, params={"title": nombre_producto, "status": "active", "limit": 1})
-        prods = r.json().get("products", [])
-        if not prods: return "NO_ENCONTRE_EXACTO"
-        
-        v = prods[0]['variants'][0]
-        payload = {"draft_order": {"line_items": [{"variant_id": v['id'], "quantity": 1}]}}
-        r2 = requests.post(f"https://{clean_url}/admin/api/2024-01/draft_orders.json", headers=headers, json=payload)
-        
-        if r2.status_code == 201:
-            return r2.json().get("draft_order", {}).get("invoice_url")
-        return "ERROR_LINK"
-
-# Instancia global
 db = GlamStoreDB()
