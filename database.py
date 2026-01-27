@@ -19,16 +19,16 @@ class GlamStoreDB:
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
-        # Arrancamos el trabajador silencioso
+        # Arrancamos el trabajador
         hilo = threading.Thread(target=self._sincronizar_loop)
         hilo.daemon = True
         hilo.start()
 
     def _sincronizar_loop(self):
-        """Actualiza el stock cada 5 min"""
+        """Actualiza el stock cada 10 min (para no saturar con 600 productos)"""
         while True:
             self._cargar_desde_shopify()
-            time.sleep(300)
+            time.sleep(600) 
 
     def _cargar_desde_shopify(self):
         if not self.shopify_token or not self.shopify_url:
@@ -36,29 +36,47 @@ class GlamStoreDB:
             return
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
+        # URL inicial
         url = f"https://{clean_url}/admin/api/2024-01/products.json"
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
+        # Pedimos el máximo por página (250)
+        params = {"status": "active", "limit": 250}
+        
+        acumulado_productos = []
         
         try:
-            logging.info("⏳ DB: Actualizando catálogo...")
-            r = requests.get(url, headers=headers, params={"status": "active", "limit": 250}, timeout=20)
+            logging.info("⏳ DB: Iniciando descarga masiva de catálogo...")
             
-            if r.status_code == 200:
-                self.productos = r.json().get("products", [])
-                self.total_items = len(self.productos)
-                # Hora Chile
-                self.ultimo_update = (datetime.utcnow() - timedelta(hours=3)).strftime("%H:%M")
+            # --- BUCLE DE PAGINACIÓN (Aquí está la magia) ---
+            while url:
+                r = requests.get(url, headers=headers, params=params, timeout=20)
                 
-                if self.productos:
-                    nombres = [p['title'] for p in self.productos[:8]]
-                    ejemplos = ", ".join(nombres)
-                    self.identidad = f"En vitrina: {ejemplos}..."
+                if r.status_code != 200:
+                    logging.error(f"❌ DB: Error Shopify {r.status_code}")
+                    break
+                
+                data = r.json().get("products", [])
+                acumulado_productos.extend(data)
+                logging.info(f"📦 Página cargada... Van {len(acumulado_productos)} productos.")
+
+                # ¿Hay página siguiente? (Link Header)
+                if 'next' in r.links:
+                    url = r.links['next']['url']
+                    params = {} # La URL nueva ya trae los parámetros necesarios
                 else:
-                    self.identidad = "Catálogo vacío."
-                
-                logging.info(f"✅ DB: Actualizado. {self.total_items} productos.")
-            else:
-                logging.error(f"❌ DB: Error Shopify {r.status_code}")
+                    url = None # No hay más páginas, rompemos el ciclo
+
+            # Guardamos el total acumulado
+            self.productos = acumulado_productos
+            self.total_items = len(self.productos)
+            self.ultimo_update = (datetime.utcnow() - timedelta(hours=3)).strftime("%H:%M")
+            
+            if self.productos:
+                nombres = [p['title'] for p in self.productos[:8]]
+                self.identidad = f"Vitrina: {', '.join(nombres)}..."
+            
+            logging.info(f"✅ DB: CARGA TOTAL EXITOSA. {self.total_items} productos listos para vender.")
+
         except Exception as e:
             logging.error(f"❌ DB: Error conexión: {e}")
 
@@ -104,5 +122,5 @@ class GlamStoreDB:
             return r2.json().get("draft_order", {}).get("invoice_url")
         return "ERROR_LINK"
 
-# INSTANCIA GLOBAL (Esto permite importarla)
+# INSTANCIA GLOBAL
 db = GlamStoreDB()
