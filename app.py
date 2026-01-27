@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 import requests
+import random  # <--- ¡IMPORTANTE! Para el barajado
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 from collections import deque
@@ -24,7 +25,7 @@ INFO_TIENDA = """
 📍 UBICACIÓN: Santo Domingo 240, Puente Alto (Interior Sandro's Collection).
 ⏰ HORARIOS: Lunes a Viernes 10:00-17:30 | Sábados 10:00-14:30.
 🚛 ENVÍOS: A todo Chile.
-🌐 WEB: www.glamstorechile.cl
+🌐 WEB OFICIAL: www.glamstorechile.cl
 """
 
 # --- MEMORIA Y ROBOT ---
@@ -41,7 +42,7 @@ hilo.daemon = True
 hilo.start()
 
 @app.route("/")
-def home(): return "🤖 GLAMBOT v18 LISTO", 200
+def home(): return "🤖 GLAMBOT DINÁMICO v20", 200
 
 # --- 3. CONFIGURACIÓN GEMINI ---
 model = None
@@ -50,28 +51,62 @@ if API_KEY_GEMINI:
     try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except: model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 4. FUNCIONES VENTAS ---
+# --- 4. FUNCIONES VENTAS (AHORA DINÁMICAS 🎲) ---
 def consultar_productos(busqueda):
     if not SHOPIFY_TOKEN: return ""
     tienda_url = SHOPIFY_URL.replace("https://", "").replace("/", "")
     headers = {"X-Shopify-Access-Token": SHOPIFY_TOKEN, "Content-Type": "application/json"}
     
-    params = {"title": busqueda, "status": "active", "limit": 5}
-    if busqueda.lower() in ["todo", "catalogo", "perfumes", "perfume", "algo", "que venden"]:
-        params = {"status": "active", "limit": 6}
+    # 1. Detectamos si es búsqueda GENERAL o ESPECÍFICA
+    palabras_clave_generales = ["todo", "catalogo", "perfumes", "perfume", "algo", "que venden", "tienes", "variedad", "muestrame", "lista"]
+    es_busqueda_general = any(p in busqueda.lower() for p in palabras_clave_generales)
+    
+    # URL de colección por defecto (Cámbiala si tienes una url especifica tipo /collections/perfumes)
+    link_coleccion = "www.glamstorechile.cl" 
+
+    if es_busqueda_general:
+        # TRUCO: Traemos 50 productos (un lote grande)
+        params = {"status": "active", "limit": 50}
+        intro_txt = "🎲 Acá te elegí algunas opciones variadas de nuestro catálogo:\n"
+    else:
+        # Búsqueda específica (por nombre o marca)
+        params = {"title": busqueda, "status": "active", "limit": 20} # Traemos 20 para tener variedad si hay muchos
+        intro_txt = f"📦 Encontré estas opciones para '{busqueda}':\n"
 
     try:
         r = requests.get(f"https://{tienda_url}/admin/api/2024-01/products.json", headers=headers, params=params)
         prods = r.json().get("products", [])
         
-        if not prods: return "NO_HAY_STOCK" 
+        if not prods:
+            if not es_busqueda_general:
+                # Si no encontró lo específico, hacemos un "Shuffle" de lo general como Plan B
+                r_fallback = requests.get(f"https://{tienda_url}/admin/api/2024-01/products.json", headers=headers, params={"status": "active", "limit": 30})
+                prods = r_fallback.json().get("products", [])
+                intro_txt = f"🔎 No vi el '{busqueda}' exacto ahora, pero mira estas joyas:\n"
             
-        txt = "📦 ENCONTRÉ ESTO:\n"
-        for p in prods:
+            if not prods: return "NO_HAY_STOCK" 
+
+        # --- AQUÍ OCURRE LA MAGIA DEL DINAMISMO 🎲 ---
+        cantidad_a_mostrar = 5
+        if len(prods) > cantidad_a_mostrar:
+            # Seleccionamos 5 al azar del lote grande
+            seleccionados = random.sample(prods, cantidad_a_mostrar)
+        else:
+            seleccionados = prods
+            
+        txt = intro_txt
+        for p in seleccionados:
             v = p['variants'][0]
-            txt += f"✨ {p['title']} (${float(v['price']):,.0f})\n"
+            precio = float(v['price'])
+            txt += f"✨ {p['title']} ➡️ ${precio:,.0f}\n"
+        
+        # Agregamos el link maestro al final
+        txt += f"\n🔗 Mira la colección completa aquí: {link_coleccion}"
         return txt
-    except: return ""
+
+    except Exception as e: 
+        logging.error(f"Error API: {e}")
+        return ""
 
 def crear_link_pago(nombre_producto):
     if not SHOPIFY_TOKEN: return ""
@@ -89,10 +124,10 @@ def crear_link_pago(nombre_producto):
     r2 = requests.post(f"https://{tienda_url}/admin/api/2024-01/draft_orders.json", headers=headers, json=payload)
     if r2.status_code == 201:
         data = r2.json().get("draft_order", {})
-        return f"✅ Link: {data.get('invoice_url')}"
+        return f"✅ Link generado para {products[0]['title']} (${float(v['price']):,.0f}):\n👉 {data.get('invoice_url')}"
     return ""
 
-# --- 5. WEBHOOK LÓGICO ---
+# --- 5. WEBHOOK INTELIGENTE ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -114,64 +149,55 @@ def recibir_mensajes():
             texto_historial = "\n".join([f"- {h['rol']}: {h['txt']}" for h in historial])
 
             if model:
-                # PASO 1: Detector de Intención (SIMPLE)
+                # Detector
                 prompt_det = f"""
-                Analiza el mensaje: "{texto}"
-                Responde UNA SOLA PALABRA:
-                - TIENDA (Si pregunta ubicación, horario, dónde están, envío)
-                - PRODUCTO (Si pregunta por stock, precio, catálogo, perfumes)
-                - COMPRAR (Si dice "quiero ese", "dame link")
-                - OTRO (Saludos, gracias, charla)
+                Analiza: "{texto}"
+                Historial: {texto_historial}
+                Clasifica: TIENDA, PRODUCTO, COMPRAR, OTRO.
                 """
                 try: decision = model.generate_content(prompt_det).text.strip().upper()
                 except: decision = "OTRO"
 
-                logging.info(f"🧠 CEREBRO DECIDIÓ: {decision}")
+                logging.info(f"🧠 INTENCIÓN: {decision}")
 
-                # PASO 2: Ejecutar Acción (LÓGICA BLINDADA)
                 info_sistema = ""
                 
                 if "TIENDA" in decision:
-                    # SI ES TIENDA, LE DAMOS LA DIRECCIÓN Y BLOQUEAMOS SHOPIFY
-                    info_sistema = f"El cliente pregunta por la tienda. USA ESTA INFO: {INFO_TIENDA}"
+                    info_sistema = f"USA ESTA INFO EXACTA: {INFO_TIENDA}"
                 
                 elif "PRODUCTO" in decision:
                     res_shopify = consultar_productos(texto)
                     if res_shopify == "NO_HAY_STOCK":
-                        info_sistema = "No se encontraron productos específicos. Invita a ver la web."
+                        info_sistema = "Dile que revise la web: www.glamstorechile.cl"
                     else:
                         info_sistema = res_shopify
                 
                 elif "COMPRAR" in decision:
-                     # Intentamos adivinar qué producto quiere comprar del texto o historial
                      info_sistema = crear_link_pago(texto) 
                      if "NO_ENCONTRE" in info_sistema:
-                         info_sistema = "No pude generar el link automático. Pide el nombre exacto."
+                         info_sistema = "No pude hacer el link. Pide el nombre exacto."
 
-                # PASO 3: Generar Respuesta (SIN CONFUSIONES)
-                instruccion_saludo = "NO SALUDES DE NUEVO (se directo)" if len(historial) > 0 else "Saluda amable"
+                # Generador
+                instruccion_saludo = "NO SALUDES (ya estamos hablando)" if len(historial) > 0 else "Saluda amable"
 
                 prompt_final = f"""
-                Actúa como GlamBot (Asistente de Glamstore Chile).
+                Eres GlamBot.
                 
                 CONTEXTO:
                 - Cliente: {nombre}
-                - Estado: {instruccion_saludo}
+                - Tono: {instruccion_saludo}. Amable, chileno relajado.
                 
-                INFO DEL SISTEMA (LO QUE SABES):
+                INFO SISTEMA:
                 {info_sistema}
                 
-                INSTRUCCIONES FINALES:
-                1. Responde SOLO al mensaje del cliente. NO digas "Entendido" ni "Perfecto".
-                2. Si la Info del Sistema tiene la dirección, dásela clara.
-                3. Si la Info del Sistema tiene productos, muéstralos.
-                4. Sé amable, usa emojis, pero NO REPITAS SALUDOS si ya hay historial.
+                INSTRUCCIONES:
+                1. Si el sistema te dio una lista de productos "barajados/variados", preséntalos como una selección especial para él/ella.
+                2. Si pregunta ubicación, da la oficial de Puente Alto.
+                3. NUNCA inventes links.
                 
-                ÚLTIMOS MENSAJES:
+                Historial:
                 {texto_historial}
                 Cliente: "{texto}"
-                
-                TU RESPUESTA:
                 """
                 
                 try:
