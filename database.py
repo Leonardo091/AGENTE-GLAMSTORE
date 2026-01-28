@@ -5,6 +5,7 @@ import unicodedata
 import os
 import logging
 import random
+from datetime import datetime
 
 # Configuración de logs compartida
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,6 +15,9 @@ class GlamStoreDB:
         self.productos = [] 
         self.total_items = 0
         self.identidad = "Cargando..."
+        self.last_sync = None
+        self.sync_status = "Iniciada"
+        self.sync_error = None
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
@@ -33,7 +37,19 @@ class GlamStoreDB:
             hilo.daemon = True
             hilo.start()
         else:
+            self.sync_status = "Error: Faltan Credenciales"
             logging.warning("⚠️ MODO SIN CONEXIÓN: Faltan credenciales de Shopify (SHOPIFY_TOKEN / SHOPIFY_URL)")
+
+    def get_status(self):
+        """Retorna el estado actual de la base de datos para debug."""
+        return {
+            "total_productos": self.total_items,
+            "ultima_sincronizacion": str(self.last_sync) if self.last_sync else "Nunca",
+            "estado_sincronizacion": self.sync_status,
+            "error_reciente": self.sync_error,
+            "url_configurada": bool(self.shopify_url),
+            "token_configurado": bool(self.shopify_token)
+        }
 
     def _sincronizar_loop(self):
         """Mantiene el inventario actualizado cada 10 minutos."""
@@ -109,14 +125,21 @@ class GlamStoreDB:
                     url = None
                     
             except Exception as e:
+                self.sync_status = "Error en conexión"
+                self.sync_error = str(e)
                 logging.error(f"Error de conexión con Shopify: {e}")
                 break
         
         if nueva_tabla:
             self.productos = nueva_tabla
             self.total_items = len(nueva_tabla)
+            self.last_sync = datetime.now()
+            self.sync_status = "OK"
+            self.sync_error = None
             logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
         else:
+            if not self.productos:
+                self.sync_status = "Alerta: Inventario Vacio"
             logging.warning("⚠️ DB: No se descargaron productos (o la lista estaba vacía). Manteniendo caché anterior.")
 
     def _normalizar(self, texto):
@@ -177,8 +200,20 @@ class GlamStoreDB:
                 return {"tipo": "RECOMENDACION_REAL", "items": resultados}
 
         # ESTRATEGIA B: Búsqueda por Palabras Clave (Búsqueda "Sucia")
-        # Filtramos palabras comunes (stopwords)
-        keywords = [p for p in palabras if p not in self.palabras_basura and len(p) > 2]
+        # Filtramos palabras comunes (stopwords) y generamos variantes
+        keywords = []
+        for p in palabras:
+            if p in self.palabras_basura or len(p) <= 2:
+                continue
+            keywords.append(p)
+            # Intento básico de singularización para español/inglés
+            if p.endswith('s') and len(p) > 3:
+                keywords.append(p[:-1]) # "perfumes" -> "perfume"
+            if p.endswith('es') and len(p) > 4:
+                keywords.append(p[:-2]) # "balsamos" -> "balsamo" (aunque normalizar quita tildes, esto ayuda)
+        
+        # Eliminar duplicados
+        keywords = list(set(keywords))
         
         if keywords:
             scored_results = []
