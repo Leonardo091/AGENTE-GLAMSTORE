@@ -56,6 +56,16 @@ def home():
         "mensaje": "El cerebro de GlamStore está activo 💅"
     }), 200
 
+@app.route("/debug/inventory")
+def debug_inventory():
+    """Endpoint para verificar el estado interno del inventario."""
+    estado = db.get_status()
+    # Si quieres protegerlo levemente:
+    token = request.args.get("token")
+    # if token != "tu_secreto": return "Acceso denegado", 403
+    
+    return jsonify(estado), 200
+
 # Endpoint de Verificación (Requerido por Meta)
 # Endpoint ÚNICO (Como estaba antes)
 @app.route("/webhook", methods=["GET", "POST"])
