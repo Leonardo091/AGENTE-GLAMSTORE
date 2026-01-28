@@ -19,7 +19,7 @@ app = Flask(__name__)
 # Cargar variables de entorno
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "glamstore_verify_token") # Token de verificación por defecto
+VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "glamstore_verify_token") # ACTUALIZADO: Coincide con tu Render
 
 # Configurar Gemini
 if API_KEY_GEMINI:
@@ -202,13 +202,10 @@ def enviar_whatsapp(numero, texto):
         logging.warning("⚠️ No se envió mensaje porque no hay WHATSAPP_TOKEN")
         return
 
-    url = "https://graph.facebook.com/v21.0/556942767500127/messages" # ID DE CUENTA ACTUALIZADO (OJO: Verificar ID)
-    # NOTA: En tu código original usabas un ID específico en la URL (939839529214459). 
-    # Asegúrate de que ese ID sea correcto o usa una variable de entorno. 
-    # Lo dejaré como variable para que sea flexible.
+    url = "https://graph.facebook.com/v21.0/556942767500127/messages" 
     
-    # ID de número de teléfono (Phone Number ID) - Lo ideal es sacarlo de una variable
-    PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_ID", "939839529214459") 
+    # ID de número de teléfono (Phone Number ID) - ACTUALIZADO
+    PHONE_NUMBER_ID = os.environ.get("META_PHONE_ID", "939839529214459") 
     url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
     
     headers = {
