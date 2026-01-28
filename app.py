@@ -57,31 +57,21 @@ def home():
     }), 200
 
 # Endpoint de Verificación (Requerido por Meta)
-@app.route("/webhook", methods=["GET"])
-def verificar_token():
-    """Para que Meta verifique que este servidor es tuyo."""
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
+# Endpoint ÚNICO (Como estaba antes)
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    # 1. VERIFICACIÓN (GET) - Meta siempre hace esto primero
+    if request.method == "GET":
+        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
+            return request.args.get("hub.challenge")
+        return "Error de validacion", 403
 
-    if mode and token:
-        if mode == "subscribe" and token == VERIFY_TOKEN:
-            logging.info("✅ WEBHOOK VERIFICADO CORRECTAMENTE")
-            return challenge, 200
-        else:
-            logging.warning("❌ FALLO VERIFICACIÓN DE WEBHOOK")
-            return "Token incorrecto", 403
-    return "Hola! Este es el webhook de GlamStore", 200
-
-@app.route("/webhook", methods=["POST"])
-def recibir_mensajes():
+    # 2. MENSAJES (POST)
     try:
         body = request.get_json()
-        logging.info(f"📨 WEBHOOK RECIBIDO (Raw): {body}")
+        logging.info(f"📨 WEBHOOK RECIBIDO: {body}")
         
-        # Validación básica de estructura de WhatsApp
         if not body or "entry" not in body:
-            logging.warning("⚠️ Payload ignorado: No tiene 'entry'")
             return jsonify({"status": "ignored"}), 200
 
         entry = body["entry"][0]["changes"][0]["value"]
@@ -92,31 +82,22 @@ def recibir_mensajes():
             texto = msg.get("text", {}).get("body", "")
             nombre = entry.get("contacts", [{}])[0].get("profile", {}).get("name", "Cliente")
             
-            logging.info(f"📩 MENSAJE DE {nombre} ({numero}): {texto}")
-
-            # Evitar procesar mensajes antiguos o vacíos
-            if not texto:
-                return jsonify({"status": "no text"}), 200
-
-            # Gestión de memoria de usuario
-            ahora_ts = time.time()
+            # Gestión de memoria
             if numero not in MEMORIA_USUARIOS:
-                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=6), 'ultimo_msg': ahora_ts}
+                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=6), 'ultimo_msg': time.time()}
             usuario = MEMORIA_USUARIOS[numero]
             
-            # Construir contexto del chat
             historial_txt = "\n".join([f"User: {h['txt']}\nBot: {h['resp']}" for h in usuario['historial']])
 
             if model:
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario)
-            else:
-                logging.error("⚠️ Modelo Gemini no configurado, no se puede responder.")
-
+            
         return jsonify({"status": "ok"}), 200
-
     except Exception as e:
-        logging.error(f"🔥 ERROR EN WEBHOOK: {e}", exc_info=True)
+        logging.error(f"🔥 ERROR: {e}")
         return jsonify({"status": "error"}), 500
+
+
 
 def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario):
     try:
