@@ -146,8 +146,9 @@ class GlamStoreDB:
             "perfume": ["perfume", "aroma", "fragancia", "eau de", "toilette"],
             "labial": ["labial", "balsamo", "lip", "gloss", "boca"],
             "ojos": ["rimel", "mascara", "pestaña", "delineador", "sombra"],
-            "rostro": ["crema", "facial", "base", "polvo", "rubor", "serum"],
-            "cabello": ["shampoo", "acondicionador", "mascara", "capilar", "pelo", "tratamiento"]
+            "rostro": ["crema", "facial", "base", "polvo", "rubor", "serum", "maquillaje"],
+            "cabello": ["shampoo", "acondicionador", "mascara", "capilar", "pelo", "tratamiento", "aceite", "argan"],
+            "accesorios": ["llavero", "monedero", "cosmetiquero", "cintillo", "accesorio", "bolso"]
         }
         
         categoria_detectada = None
