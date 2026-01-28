@@ -75,5 +75,47 @@ class TestGlamStoreLogic(unittest.TestCase):
         res = self.db.buscar_contextual("Venden pan?")
         self.assertEqual(res['tipo'], "VACIO")
 
+    def test_caso_usuario_fotos(self):
+        """
+        Prueba basada en las capturas de pantalla del usuario.
+        Productos reales:
+        1. Maison Alhambra Glacier Ultra Edp 30ml
+        2. Lattafa Mayar Desodorante Spray 200 ml Mujer
+        """
+        self.db.productos = [
+            {
+                'id': 101, 
+                'title': "Maison Alhambra Glacier Ultra Edp 30ml", 
+                'price': 15000, 
+                'search_text': "maison alhambra glacier ultra edp 30ml hombre perfume"
+            },
+            {
+                'id': 102, 
+                'title': "Lattafa Mayar Desodorante Spray 200 Ml Mujer", 
+                'price': 12000, 
+                'search_text': "lattafa mayar desodorante spray 200 ml mujer desodorantes"
+            }
+        ]
+        
+        # Caso 1: "Tienen el glacier ultra edp 30 ml ?"
+        query1 = "Tienen el glacier ultra edp 30 ml ?"
+        res1 = self.db.buscar_contextual(query1)
+        print(f"\nBusqueda Foto 1 ('{query1}'): {res1['tipo']}")
+        found1 = any("Glacier Ultra" in p['title'] for p in res1['items'])
+        self.assertTrue(found1, "Debería encontrar Glacier Ultra")
+
+        # Caso 2: "Y el Lattafa Mayar Desodorante Spray 200 Ml Mujer"
+        query2 = "Y el Lattafa Mayar Desodorante Spray 200 Ml Mujer"
+        res2 = self.db.buscar_contextual(query2)
+        print(f"Busqueda Foto 2 ('{query2}'): {res2['tipo']}")
+        found2 = any("Lattafa Mayar" in p['title'] for p in res2['items'])
+        self.assertTrue(found2, "Debería encontrar Lattafa Mayar")
+
+        # Caso 3: "Hola busco perfumes" (Debería activar categoría o keyword)
+        query3 = "Hola busco perfumes"
+        res3 = self.db.buscar_contextual(query3)
+        print(f"Busqueda Foto 3 ('{query3}'): {res3['tipo']}")
+        self.assertNotEqual(res3['tipo'], "VACIO")
+
 if __name__ == '__main__':
     unittest.main()
