@@ -76,6 +76,15 @@ def debug_config():
         "SHOPIFY_TOKEN_MASKED": f"'{token[:5]}...{token[-4:]}'" if len(token) > 10 else "SHORT/EMPTY"
     })
 
+@app.route("/debug/force_sync", methods=["GET"])
+def debug_force_sync():
+    """Fuerza la sincronización síncrona y devuelve el resultado."""
+    try:
+        db._actualizar_tabla_maestra() 
+        return jsonify(db.get_status())
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "failed"}), 500
+
 @app.route("/debug/search", methods=["GET"])
 def debug_search():
     """Endpoint para probar la búsqueda en tiempo real."""
