@@ -24,7 +24,7 @@ VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "glamstore_verify_token") # A
 # Configurar Gemini
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-2.0-flash')
 else:
     logging.error("❌ NO SE ENCONTRÓ GEMINI_API_KEY")
     model = None
