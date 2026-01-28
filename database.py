@@ -137,6 +137,12 @@ class GlamStoreDB:
             self.sync_status = "OK"
             self.sync_error = None
             logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
+            
+            # --- LOG DE MUESTRA PARA DEBUG ---
+            if self.productos:
+                p = self.productos[0]
+                logging.info(f"🔍 MUESTRA DE DATO (Producto 1): Title='{p['title']}' | Search='{p['search_text']}'")
+            # ---------------------------------
         else:
             if not self.productos:
                 self.sync_status = "Alerta: Inventario Vacio"
@@ -147,7 +153,9 @@ class GlamStoreDB:
         try:
             # Normalización unicode, eliminación de tildes y minúsculas
             text_str = str(texto)
-            return unicodedata.normalize('NFKD', text_str).encode('ASCII', 'ignore').decode('utf-8').lower()
+            # Reemplazar puntuación por espacios para evitar "shampoos?" -> "shampoos?"
+            text_str = text_str.replace("?", " ").replace("!", " ").replace(".", " ").replace(",", " ")
+            return unicodedata.normalize('NFKD', text_str).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
         except:
             return str(texto).lower()
 
