@@ -37,7 +37,7 @@ def home():
         return jsonify({
             "estado": estado, 
             "productos_ram": db.total_items, 
-            "mensaje": "El bot solo venderá lo que encuentre aquí."
+            "mensaje": "El sistema está estable. Horario actualizado."
         }), 200
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -95,8 +95,7 @@ def recibir_mensajes():
                 elif "BUSCAR" in decision:
                     res = db.buscar_producto_rapido(texto)
                     if res["tipo"] == "VACIO": 
-                        # ESTO ES CLAVE: Le decimos explícitamente que NO HAY.
-                        info_sistema = "RESULTADO DE BÚSQUEDA: 0 COINCIDENCIAS. NO TENEMOS ESTE PRODUCTO."
+                        info_sistema = "RESULTADO: 0 COINCIDENCIAS. NO LO TENEMOS."
                     else:
                         titulo = "EN STOCK:" if res["tipo"] == "EXACTO" else "RECOMENDACIONES STOCK:"
                         items = ""
@@ -105,23 +104,29 @@ def recibir_mensajes():
                         info_sistema = f"{titulo}{items}"
 
                 elif "INFO" in decision:
-                    info_sistema = "Ubicación: Santo Domingo 240, Puente Alto. Horario: Lun-Vie 10-19, Sab 10-14."
+                    # --- AQUÍ ESTÁ EL HORARIO FIJO Y CLARO ---
+                    info_sistema = """
+                    Dirección: Santo Domingo 240, Puente Alto.
+                    Horario: 
+                    - Lunes a Viernes: 10:00 AM a 05:30 PM.
+                    - Sábados: 10:00 AM a 02:30 PM.
+                    - Domingos: CERRADO.
+                    """
 
-                # 3. RESPONDER (CON CANDADO)
+                # 3. RESPONDER
                 saludo = "Saluda formal (Usted)" if debe_saludar else "NO SALUDES"
                 
                 prompt_final = f"""
-                Eres GlamBot, vendedor honesto de Glamstore.
+                Eres GlamBot, vendedor amable de Glamstore.
                 
-                TU INVENTARIO REAL (LO ÚNICO QUE EXISTE):
+                DATA REAL:
                 {info_sistema}
                 
-                REGLAS SUPREMAS (LEER CON ATENCIÓN):
-                1. SI LA DATA DICE "0 COINCIDENCIAS" O "NO TENEMOS", DEBES DECIR: "Lo siento, actualmente no trabajamos ese producto" y sugerir que pregunten por otra cosa.
-                2. JAMÁS inventes que tenemos una marca si no aparece en la lista de arriba.
-                3. JAMÁS inventes links tipo [Enlace...]. Si no tienes el link real, no lo mandes.
-                4. Solo vende lo que ves en "TU INVENTARIO REAL". El resto NO EXISTE para ti.
-                5. {saludo}.
+                REGLAS:
+                1. USA EL HORARIO EXACTO QUE APARECE ARRIBA (AM/PM). No lo cambies.
+                2. Si la data dice "0 COINCIDENCIAS", di amablemente que no trabajamos ese producto.
+                3. NO inventes links.
+                4. {saludo}.
                 
                 Chat: {historial_txt}
                 Cliente: "{texto}"
