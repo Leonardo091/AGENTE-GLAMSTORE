@@ -245,18 +245,25 @@ class GlamStoreDB:
         
         return {"tipo": "VACIO", "items": []}
 
-    def generar_checkout(self, texto_usuario):
+    def generar_checkout(self, texto_usuario, productos_contexto=None):
         """Genera un Draft Order en Shopify y retorna el link de pago."""
         if not self.shopify_token or not self.shopify_url:
             return None
 
-        # Reutilizamos la búsqueda para encontrar QUÉ quiere comprar
-        res = self.buscar_contextual(texto_usuario)
-        if not res["items"]: 
+        items_a_comprar = []
+
+        # CASO 1: Vienen productos del contexto (Memoria)
+        if productos_contexto:
+            items_a_comprar = productos_contexto
+        else:
+            # CASO 2: Buscamos en el texto del usuario
+            res = self.buscar_contextual(texto_usuario)
+            if res["items"]:
+                # Asumimos que quiere el primer resultado si busca por texto
+                items_a_comprar = [res["items"][0]]
+
+        if not items_a_comprar:
             return None
-        
-        # Asumimos que quiere el primer resultado (el más relevante)
-        producto = res["items"][0] 
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
         headers = {
@@ -264,16 +271,21 @@ class GlamStoreDB:
             "Content-Type": "application/json"
         }
         
+        # Construir line_items para TODOS los productos identificados
+        line_items = []
+        nombres_productos = []
+        for p in items_a_comprar:
+            line_items.append({
+                "variant_id": p['variant_id'], 
+                "quantity": 1
+            })
+            nombres_productos.append(p['title'])
+            
         # Crear la orden borrador (Draft Order)
         try:
             payload = {
                 "draft_order": {
-                    "line_items": [
-                        {
-                            "variant_id": producto['variant_id'], 
-                            "quantity": 1
-                        }
-                    ],
+                    "line_items": line_items,
                     "note": "Pedido generado vía GlamBot (WhatsApp AI) 🤖",
                     "tags": "whatsapp-bot"
                 }
@@ -286,7 +298,7 @@ class GlamStoreDB:
                 data = r.json().get("draft_order", {})
                 return {
                     "url": data.get("invoice_url"), # URL de pago directo
-                    "nombre": producto['title']
+                    "nombre": ", ".join(nombres_productos)
                 }
             else:
                 logging.error(f"Error creando orden Shopify: {r.text}")
