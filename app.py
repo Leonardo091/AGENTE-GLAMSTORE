@@ -30,12 +30,8 @@ hilo_ping.start()
 @app.route("/")
 def home():
     try:
-        estado = "🟢 TABLA LISTA" if db.total_items > 0 else "⚠️ CREANDO TABLA (Espera...)"
-        return jsonify({
-            "estado": estado, 
-            "total_productos": db.total_items, 
-            "mensaje": "Sistema de Tabla Maestra (RAM) operando."
-        }), 200
+        estado = "🟢 TABLA LISTA" if db.total_items > 0 else "⚠️ ESPERANDO DATOS"
+        return jsonify({"estado": estado, "total": db.total_items, "msg": "Filtro de palabras basura activo."}), 200
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 # Gemini
@@ -71,49 +67,62 @@ def recibir_mensajes():
             historial_txt = "\n".join([f"- {h['rol']}: {h['txt']}" for h in usuario['historial']])
 
             if model:
-                # 1. CLASIFICAR
+                # 1. CLASIFICACIÓN MEJORADA (Con Ejemplos para que no sea tonto)
                 prompt_det = f"""
+                Clasifica la intención del mensaje.
                 Mensaje: "{texto}"
                 Historial: {historial_txt}
-                Responde SOLO UNA PALABRA: VENDER, BUSCAR, INFO, CHARLA.
+                
+                EJEMPLOS:
+                - "Quiero comprar el perfume yara", "mándame el link de pago" -> VENDER
+                - "¿Tienen perfumes?", "¿Qué venden?", "Precio del yara" -> INFO_PRODUCTO
+                - "Horario", "Ubicación", "Mayorista" -> INFO_TIENDA
+                - "Hola", "Gracias" -> CHARLA
+                
+                Responde SOLO UNA PALABRA: VENDER, INFO_PRODUCTO, INFO_TIENDA, CHARLA.
                 """
                 try: decision = model.generate_content(prompt_det).text.strip().split()[0]
                 except: decision = "CHARLA"
 
                 info_sistema = ""
 
-                # 2. CONSULTAR TABLA MAESTRA
+                # 2. LÓGICA DE DATOS
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
-                    if "ERROR" in link or "NO_ENCONTRE" in link: info_sistema = "DATA: No se pudo generar el link. Producto no hallado."
+                    if "ERROR" in link or "NO_ENCONTRE" in link: 
+                        # Si falló el link, cambiamos estrategia a búsqueda normal
+                        info_sistema = "DATA: No pude generar link directo. Recomienda buscar el nombre exacto."
                     else: info_sistema = f"DATA: Link generado: {link}"
 
-                elif "BUSCAR" in decision:
+                elif "INFO_PRODUCTO" in decision:
                     res = db.buscar_producto_rapido(texto)
-                    if res["tipo"] == "VACIO": 
-                        info_sistema = f"DATA: Busqué '{texto}' y encontré 0 coincidencias en la Tabla Maestra."
+                    
+                    if res.get("motivo") == "SOLO_STOPWORDS":
+                        # Caso: "¿Qué venden?" -> El buscador borró todo y quedó vacío.
+                        info_sistema = "DATA_GENERAL: El cliente pregunta por catálogo general. Menciona Maquillaje, Perfumes (Árabes y tradicionales), Capilar."
+                    elif res["tipo"] == "VACIO":
+                        info_sistema = "DATA: 0 coincidencias en stock."
                     else:
                         items = ", ".join([f"{p['title']} (${p['price']:,.0f})" for p in res["items"]])
-                        info_sistema = f"DATA: Encontrados en Tabla Maestra: {items}"
+                        info_sistema = f"DATA: Encontrados: {items}"
 
-                # 3. PROMPT MAESTRO
+                elif "INFO_TIENDA" in decision:
+                    info_sistema = "DATA: Ubicación: Santo Domingo 240, Puente Alto. Horario: Lun-Vie 10:00-17:30, Sab 10:00-14:30."
+
+                # 3. PROMPT MAESTRO (EL PUENTE)
                 prompt_final = f"""
-                Eres "GlamBot", el puente entre el cliente y Glamstore Chile.
+                Eres "GlamBot", asistente de Glamstore Chile.
                 
-                === TABLA DE DATOS (REAL TIME) ===
+                === INFORMACIÓN DEL SISTEMA (DATA REAL) ===
                 {info_sistema}
                 
-                === REGLAS DEL NEGOCIO (INAMOVIBLES) ===
-                1. UBICACIÓN: Santo Domingo 240, Puente Alto.
-                2. HORARIO: Lun-Vie 10:00 AM - 05:30 PM | Sab 10:00 AM - 02:30 PM | Dom CERRADO.
-                3. VENTA MAYORISTA: "Solo venta al detalle por este medio. Visite tienda para mayorista."
-                
-                === INSTRUCCIONES DE RESPUESTA ===
-                - Si la DATA dice "0 coincidencias": Sé honesto. Di "Busqué en nuestro inventario y no encontré [Producto]. ¿Buscas algo similar?".
-                - Si la DATA muestra productos: Diles los nombres y precios exactos que ves ahí.
-                - Si escribieron mal una marca (ej: Mason vs Maison), asume que es un error humano y si la DATA encontró algo similar, ofrécelo.
-                - NO inventes links ni productos.
-                - { "Saluda al inicio." if debe_saludar else "Sé directo, no saludes de nuevo." }
+                === TUS REGLAS ===
+                1. SI LA DATA MUESTRA PRODUCTOS: Ofrécelos con sus precios.
+                2. SI LA DATA ES "0 COINCIDENCIAS": Di "Busqué en inventario y no encontré [Producto]. ¿Te interesa ver otra cosa?".
+                3. SI LA DATA ES GENERAL (¿Qué venden?): Di "Tenemos una gran variedad de Perfumes (Árabes y Tradicionales), Maquillaje y Cuidado Capilar.".
+                4. HORARIO: Lun-Vie 10:00 AM - 05:30 PM | Sab 10:00 AM - 02:30 PM.
+                5. NO inventes links.
+                6. { "Saluda cortésmente." if debe_saludar else "Ve directo al punto." }
                 
                 Chat: {historial_txt}
                 Cliente: "{texto}"
