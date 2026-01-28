@@ -66,6 +66,22 @@ def debug_inventory():
     
     return jsonify(estado), 200
 
+@app.route("/debug/search")
+def debug_search():
+    """Endpoint para probar la búsqueda en tiempo real."""
+    query = request.args.get("q", "")
+    if not query:
+        return "Falta parámetro 'q'", 400
+    
+    # Realizar búsqueda
+    resultado = db.buscar_contextual(query)
+    
+    return jsonify({
+        "query": query,
+        "query_normalizada": db._normalizar(query),
+        "resultado": resultado
+    }), 200
+
 # Endpoint de Verificación (Requerido por Meta)
 # Endpoint ÚNICO (Como estaba antes)
 @app.route("/webhook", methods=["GET", "POST"])
