@@ -56,7 +56,7 @@ def home():
         "mensaje": "El cerebro de GlamStore está activo 💅"
     }), 200
 
-@app.route("/debug/inventory")
+@app.route("/debug/inventory", methods=["GET"])
 def debug_inventory():
     """Endpoint para verificar el estado interno del inventario."""
     estado = db.get_status()
@@ -66,7 +66,17 @@ def debug_inventory():
     
     return jsonify(estado), 200
 
-@app.route("/debug/search")
+@app.route("/debug/config", methods=["GET"])
+def debug_config():
+    """Muestra qué está viendo el servidor en las variables de entorno (OJO: Muestra datos semi-sensibles)"""
+    token = os.environ.get("SHOPIFY_TOKEN", "")
+    url = os.environ.get("SHOPIFY_URL", "")
+    return jsonify({
+        "SHOPIFY_URL_RAW": f"'{url}'", # Comillas para ver espacios
+        "SHOPIFY_TOKEN_MASKED": f"'{token[:5]}...{token[-4:]}'" if len(token) > 10 else "SHORT/EMPTY"
+    })
+
+@app.route("/debug/search", methods=["GET"])
 def debug_search():
     """Endpoint para probar la búsqueda en tiempo real."""
     query = request.args.get("q", "")
