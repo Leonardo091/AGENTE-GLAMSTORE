@@ -16,9 +16,6 @@ API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
 MEMORIA_USUARIOS = {}
 
-def obtener_hora_chile():
-    return (datetime.utcnow() - timedelta(hours=3)).strftime("%H:%M")
-
 def despertar_render():
     while True:
         time.sleep(300)
@@ -33,11 +30,11 @@ hilo_ping.start()
 @app.route("/")
 def home():
     try:
-        estado = "🟢 CONECTADO" if db.total_items > 0 else "⚠️ MODO RESPALDO (Directo a Shopify)"
+        estado = "🟢 TABLA LISTA" if db.total_items > 0 else "⚠️ CREANDO TABLA (Espera...)"
         return jsonify({
             "estado": estado, 
-            "productos_ram": db.total_items, 
-            "mensaje": "Prompt Maestro Cargado. Bot listo para operar."
+            "total_productos": db.total_items, 
+            "mensaje": "Sistema de Tabla Maestra (RAM) operando."
         }), 200
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -67,92 +64,59 @@ def recibir_mensajes():
                 MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
             usuario = MEMORIA_USUARIOS[numero]
             
-            # Solo saludamos si pasaron 2 horas o es nuevo
             debe_saludar = (ahora_ts - usuario['ultimo_msg'] > 7200) or (usuario['ultimo_msg'] == 0)
-            # Y si el cliente explícitamente dijo hola, forzamos el saludo para ser educados
-            if any(s in texto.lower() for s in ["hola", "buenas", "alo"]): debe_saludar = True
-            
+            if any(s in texto.lower() for s in ["hola", "buenas"]): debe_saludar = True
             usuario['ultimo_msg'] = ahora_ts
+            
             historial_txt = "\n".join([f"- {h['rol']}: {h['txt']}" for h in usuario['historial']])
 
             if model:
-                # 1. CLASIFICAR INTENCIÓN
+                # 1. CLASIFICAR
                 prompt_det = f"""
-                Analiza el mensaje del cliente.
                 Mensaje: "{texto}"
                 Historial: {historial_txt}
-                
-                Opciones:
-                - VENDER: El cliente pide un link de pago o dice "quiero comprar X".
-                - BUSCAR: El cliente pregunta si tienen un producto específico (ej: "¿Tienen Lattafa?").
-                - INFO: Pregunta horarios, ubicación, "¿qué venden?", "mayorista", envíos.
-                - CHARLA: Saludos simples o conversación genérica.
-                
-                Responde SOLO UNA PALABRA.
+                Responde SOLO UNA PALABRA: VENDER, BUSCAR, INFO, CHARLA.
                 """
                 try: decision = model.generate_content(prompt_det).text.strip().split()[0]
                 except: decision = "CHARLA"
 
                 info_sistema = ""
 
-                # 2. BUSCAR DATA (Sin tocar el código, solo recolectar)
+                # 2. CONSULTAR TABLA MAESTRA
                 if "VENDER" in decision:
                     link = db.crear_link_pago_seguro(texto)
-                    if link == "NO_ENCONTRE_EXACTO": info_sistema = "DATA: Producto no encontrado exacto para link."
-                    elif link == "ERROR_LINK": info_sistema = "DATA: Error técnico al generar link."
-                    else: info_sistema = f"DATA: Link de pago generado: {link}"
+                    if "ERROR" in link or "NO_ENCONTRE" in link: info_sistema = "DATA: No se pudo generar el link. Producto no hallado."
+                    else: info_sistema = f"DATA: Link generado: {link}"
 
                 elif "BUSCAR" in decision:
                     res = db.buscar_producto_rapido(texto)
                     if res["tipo"] == "VACIO": 
-                        info_sistema = "DATA: 0 Coincidencias encontradas en stock."
+                        info_sistema = f"DATA: Busqué '{texto}' y encontré 0 coincidencias en la Tabla Maestra."
                     else:
                         items = ", ".join([f"{p['title']} (${p['price']:,.0f})" for p in res["items"]])
-                        info_sistema = f"DATA: Tenemos en stock: {items}"
+                        info_sistema = f"DATA: Encontrados en Tabla Maestra: {items}"
 
-                # 3. PROMPT MAESTRO (AQUÍ ESTÁ LA SEGMENTACIÓN)
-                # Definimos claramente los límites y respuestas tipo
-                
+                # 3. PROMPT MAESTRO
                 prompt_final = f"""
-                Eres "GlamBot", el asistente virtual experto de Glamstore Chile.
-                Tu tono es: Profesional, amable, directo y seguro.
+                Eres "GlamBot", el puente entre el cliente y Glamstore Chile.
                 
-                === TUS LÍMITES (SEGMENTACIÓN) ===
+                === TABLA DE DATOS (REAL TIME) ===
+                {info_sistema}
+                
+                === REGLAS DEL NEGOCIO (INAMOVIBLES) ===
                 1. UBICACIÓN: Santo Domingo 240, Puente Alto.
-                2. HORARIO (ESTRICTO):
-                   - Lunes a Viernes: 10:00 AM a 05:30 PM.
-                   - Sábados: 10:00 AM a 02:30 PM.
-                   - Domingos: CERRADO.
-                3. LO QUE VENDEMOS: Maquillaje, Perfumes (Árabes y tradicionales), Cuidado Capilar y Skincare.
-                4. LO QUE NO VENDEMOS: Ropa, Zapatillas, Repuestos, Comida.
+                2. HORARIO: Lun-Vie 10:00 AM - 05:30 PM | Sab 10:00 AM - 02:30 PM | Dom CERRADO.
+                3. VENTA MAYORISTA: "Solo venta al detalle por este medio. Visite tienda para mayorista."
                 
-                === TUS REGLAS DE RESPUESTA (PLAYBOOK) ===
+                === INSTRUCCIONES DE RESPUESTA ===
+                - Si la DATA dice "0 coincidencias": Sé honesto. Di "Busqué en nuestro inventario y no encontré [Producto]. ¿Buscas algo similar?".
+                - Si la DATA muestra productos: Diles los nombres y precios exactos que ves ahí.
+                - Si escribieron mal una marca (ej: Mason vs Maison), asume que es un error humano y si la DATA encontró algo similar, ofrécelo.
+                - NO inventes links ni productos.
+                - { "Saluda al inicio." if debe_saludar else "Sé directo, no saludes de nuevo." }
                 
-                CASO 1: CLIENTE PREGUNTA "¿QUÉ VENDEN?" O "¿QUÉ TIENEN?"
-                - NO saludes de nuevo.
-                - Responde: "Nos especializamos en belleza. Tenemos una gran variedad de perfumes (incluyendo marcas árabes como Lattafa), maquillaje completo, y productos de cuidado capilar y facial."
-                
-                CASO 2: CLIENTE PREGUNTA POR "MAYORISTA"
-                - Responde: "Actualmente nuestra atención es venta al detalle en este canal, pero te invitamos a visitarnos en tienda para ver opciones presenciales."
-                
-                CASO 3: EL CLIENTE SALUDA ("Hola")
-                - Si es el primer mensaje, saluda y ofrece ayuda.
-                - Si ya saludaste antes en el historial, NO repitas el saludo. Ve al grano.
-                
-                CASO 4: STOCK Y VENTAS
-                - Información del sistema: "{info_sistema}"
-                - Si la Data dice "0 Coincidencias": Di "Lo siento, actualmente no tenemos ese producto específico en stock." y ofrece ver otra cosa.
-                - Si la Data tiene productos: Muéstralos con sus precios.
-                - JAMÁS inventes productos que no salgan en la "Información del sistema".
-                - JAMÁS inventes enlaces web falsos.
-                
-                === CONTEXTO ACTUAL ===
-                Historial de chat:
-                {historial_txt}
-                
-                Mensaje nuevo del Cliente: "{texto}"
-                
-                Respuesta de GlamBot:
+                Chat: {historial_txt}
+                Cliente: "{texto}"
                 """
                 
                 try:
