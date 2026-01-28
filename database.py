@@ -6,8 +6,8 @@ import os
 import logging
 import random
 
-# Logs limpios
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+# Configuración de logs compartida
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class GlamStoreDB:
     def __init__(self):
@@ -17,48 +17,77 @@ class GlamStoreDB:
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
-        # Palabras que NO sirven para buscar producto específico
-        self.palabras_basura = [
+        # Palabras que NO sirven para buscar producto específico (stopwords)
+        self.palabras_basura = {
             "hola", "buenos", "dias", "tardes", "busco", "venden", "tienen", 
             "quiero", "necesito", "comprar", "precio", "valor", "cuanto", 
             "vale", "cuesta", "ejemplo", "muestrame", "algun", "alguno", 
             "articulo", "producto", "dato", "puedes", "dar", "me", "das",
-            "recomendar", "recomendarias", "para", "mi", "hija", "mama", "regalo"
-        ]
+            "recomendar", "recomendarias", "para", "mi", "hija", "mama", "regalo",
+            "glamstore", "tienda", "gracias", "favor", "por"
+        }
         
-        # Trabajador en segundo plano
-        hilo = threading.Thread(target=self._sincronizar_loop)
-        hilo.daemon = True
-        hilo.start()
+        # Iniciar sincronización en segundo plano solo si hay credenciales
+        if self.shopify_token and self.shopify_url:
+            hilo = threading.Thread(target=self._sincronizar_loop)
+            hilo.daemon = True
+            hilo.start()
+        else:
+            logging.warning("⚠️ MODO SIN CONEXIÓN: Faltan credenciales de Shopify (SHOPIFY_TOKEN / SHOPIFY_URL)")
 
     def _sincronizar_loop(self):
+        """Mantiene el inventario actualizado cada 10 minutos."""
         while True:
-            try: self._actualizar_tabla_maestra()
-            except: pass
+            try:
+                self._actualizar_tabla_maestra()
+            except Exception as e:
+                logging.error(f"Error crítico en loop de sincronización: {e}")
             time.sleep(600) 
 
     def _actualizar_tabla_maestra(self):
-        if not self.shopify_token: return
-        
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
+        # API versionada (actualizada a una reciente estable)
         url = f"https://{clean_url}/admin/api/2024-01/products.json"
-        headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
+        headers = {
+            "X-Shopify-Access-Token": self.shopify_token, 
+            "Content-Type": "application/json"
+        }
         params = {"status": "active", "limit": 250}
         
         nueva_tabla = []
-        logging.info("🔄 DB: Sincronizando inventario...")
+        logging.info("🔄 DB: Iniciando sincronización de inventario con Shopify...")
         
+        pagina = 1
         while url:
             try:
+                # Respetar rate limits de Shopify
                 time.sleep(0.5)
-                r = requests.get(url, headers=headers, params=params, timeout=15)
-                if r.status_code != 200: break
+                
+                logging.info(f"   - Descargando página {pagina}...")
+                r = requests.get(url, headers=headers, params=params, timeout=20)
+                
+                if r.status_code != 200:
+                    logging.error(f"❌ Error Shopify {r.status_code}: {r.text}")
+                    break
                 
                 data = r.json().get("products", [])
                 for p in data:
                     try:
-                        precio = float(p["variants"][0]["price"]) if p["variants"] else 0
-                        texto_sucio = f"{p['title']} {p.get('vendor','')} {p.get('product_type','')} {p.get('tags','')}"
+                        # Solo procesamos si tiene variantes
+                        if not p.get("variants"): continue
+
+                        # Precio de la primera variante (precio base)
+                        precio = float(p["variants"][0]["price"])
+                        
+                        # Construir texto de búsqueda enriquecido
+                        parts = [
+                            p.get('title', ''),
+                            p.get('vendor', ''),
+                            p.get('product_type', ''),
+                            p.get('tags', '')
+                        ]
+                        # Unir y limpiar
+                        texto_sucio = " ".join([str(x) for x in parts if x])
                         texto_limpio = self._normalizar(texto_sucio)
                         
                         nueva_tabla.append({
@@ -66,83 +95,161 @@ class GlamStoreDB:
                             "title": p["title"],
                             "price": precio,
                             "search_text": texto_limpio,
-                            "category_text": texto_limpio, # Para búsquedas amplias
-                            "variant_id": p["variants"][0]["id"] if p["variants"] else 0
+                            "variant_id": p["variants"][0]["id"]
                         })
-                    except: pass
+                    except Exception as e:
+                        logging.warning(f"Error procesando producto {p.get('id')}: {e}")
 
-                if 'next' in r.links: url = r.links['next']['url']; params = {}
-                else: url = None
-            except: break
+                # Paginación (Link header)
+                if 'next' in r.links:
+                    url = r.links['next']['url']
+                    params = {} # Los params ya vienen en la URL de 'next'
+                    pagina += 1
+                else:
+                    url = None
+                    
+            except Exception as e:
+                logging.error(f"Error de conexión con Shopify: {e}")
+                break
         
         if nueva_tabla:
             self.productos = nueva_tabla
             self.total_items = len(nueva_tabla)
-            logging.info(f"✅ DB: Inventario listo con {self.total_items} productos.")
+            logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
+        else:
+            logging.warning("⚠️ DB: No se descargaron productos (o la lista estaba vacía). Manteniendo caché anterior.")
 
     def _normalizar(self, texto):
         if not texto: return ""
-        return unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').lower()
+        try:
+            # Normalización unicode, eliminación de tildes y minúsculas
+            text_str = str(texto)
+            return unicodedata.normalize('NFKD', text_str).encode('ASCII', 'ignore').decode('utf-8').lower()
+        except:
+            return str(texto).lower()
 
     # --- FUNCIONES DE BÚSQUEDA ELITE ---
 
     def buscar_contextual(self, texto_usuario):
         """
-        Esta es la clave. Si el usuario pide "perfume", sacamos perfumes REALES del stock.
+        Busca productos basados en categorías o palabras clave del usuario.
+        Retorna una estructura estandarizada.
         """
+        if not self.productos:
+            return {"tipo": "VACIO", "items": []}
+
         texto_limpio = self._normalizar(texto_usuario)
         palabras = texto_limpio.split()
         
-        # 1. Detectar intención de categoría
-        categorias_clave = ["perfume", "colonia", "aroma", "labial", "rimel", "crema", "shampoo", "capilar", "maquillaje"]
+        # 1. Definición de Categorías Clave (Expandible)
+        categorias_map = {
+            "perfume": ["perfume", "aroma", "fragancia", "eau de", "toilette"],
+            "labial": ["labial", "balsamo", "lip", "gloss", "boca"],
+            "ojos": ["rimel", "mascara", "pestaña", "delineador", "sombra"],
+            "rostro": ["crema", "facial", "base", "polvo", "rubor", "serum"],
+            "cabello": ["shampoo", "acondicionador", "mascara", "capilar", "pelo", "tratamiento"]
+        }
+        
         categoria_detectada = None
         
-        for cat in categorias_clave:
-            if cat in texto_limpio:
-                categoria_detectada = cat
+        # Detectar si el usuario menciona alguna categoría conocida
+        for cat_key, sinonimos in categorias_map.items():
+            if any(s in texto_limpio for s in sinonimos):
+                categoria_detectada = cat_key
                 break
         
         resultados = []
         
-        # Si detectamos categoría, filtramos el stock por eso
-        if categoria_detectada and self.productos:
-            candidatos = [p for p in self.productos if categoria_detectada in p['search_text']]
-            # Tomamos 5 al azar para dar variedad
+        # ESTRATEGIA A: Filtrado por Categoría
+        if categoria_detectada:
+            # Buscar productos que contengan palabras de esa categoría o sus sinónimos
+            sinonimos_cat = categorias_map[categoria_detectada]
+            candidatos = []
+            for p in self.productos:
+                # Chequeamos si el producto encaja en la categoría detectada
+                if any(s in p['search_text'] for s in sinonimos_cat):
+                    candidatos.append(p)
+            
             if candidatos:
+                # Retornar una selección aleatoria para variedad (marketing)
                 resultados = random.sample(candidatos, min(5, len(candidatos)))
                 return {"tipo": "RECOMENDACION_REAL", "items": resultados}
 
-        # Si no es categoría, buscamos palabras específicas (marca o nombre)
-        keywords = [p for p in palabras if p not in self.palabras_basura]
-        if keywords and self.productos:
+        # ESTRATEGIA B: Búsqueda por Palabras Clave (Búsqueda "Sucia")
+        # Filtramos palabras comunes (stopwords)
+        keywords = [p for p in palabras if p not in self.palabras_basura and len(p) > 2]
+        
+        if keywords:
+            scored_results = []
             for p in self.productos:
                 matches = 0
                 for kw in keywords:
-                    if kw in p['search_text']: matches += 1
-                if matches >= len(keywords):
-                    resultados.append(p)
+                    if kw in p['search_text']:
+                        matches += 1
+                
+                # Sistema de puntaje simple: Más palabras coincidentes = mejor
+                if matches > 0:
+                    scored_results.append((matches, p))
             
-            if resultados:
-                return {"tipo": "EXACTO", "items": resultados[:5]}
+            # Ordenar por relevancia (mayor matches primero)
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            
+            if scored_results:
+                # Tomar los top 5
+                resultados = [x[1] for x in scored_results[:5]]
+                return {"tipo": "EXACTO", "items": resultados}
         
         return {"tipo": "VACIO", "items": []}
 
     def generar_checkout(self, texto_usuario):
-        # Buscamos el producto más probable
+        """Genera un Draft Order en Shopify y retorna el link de pago."""
+        if not self.shopify_token or not self.shopify_url:
+            return None
+
+        # Reutilizamos la búsqueda para encontrar QUÉ quiere comprar
         res = self.buscar_contextual(texto_usuario)
-        if not res["items"]: return None
+        if not res["items"]: 
+            return None
         
-        producto = res["items"][0] # El mejor candidato
+        # Asumimos que quiere el primer resultado (el más relevante)
+        producto = res["items"][0] 
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
-        headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
+        headers = {
+            "X-Shopify-Access-Token": self.shopify_token, 
+            "Content-Type": "application/json"
+        }
         
+        # Crear la orden borrador (Draft Order)
         try:
-            payload = {"draft_order": {"line_items": [{"variant_id": producto['variant_id'], "quantity": 1}]}}
-            r = requests.post(f"https://{clean_url}/admin/api/2024-01/draft_orders.json", headers=headers, json=payload)
+            payload = {
+                "draft_order": {
+                    "line_items": [
+                        {
+                            "variant_id": producto['variant_id'], 
+                            "quantity": 1
+                        }
+                    ],
+                    "note": "Pedido generado vía GlamBot (WhatsApp AI) 🤖",
+                    "tags": "whatsapp-bot"
+                }
+            }
+            
+            url = f"https://{clean_url}/admin/api/2024-01/draft_orders.json"
+            r = requests.post(url, headers=headers, json=payload, timeout=10)
+            
             if r.status_code == 201: 
-                return {"url": r.json().get("draft_order", {}).get("invoice_url"), "nombre": producto['title']}
-        except: pass
+                data = r.json().get("draft_order", {})
+                return {
+                    "url": data.get("invoice_url"), # URL de pago directo
+                    "nombre": producto['title']
+                }
+            else:
+                logging.error(f"Error creando orden Shopify: {r.text}")
+                
+        except Exception as e:
+            logging.error(f"Excepción generando checkout: {e}")
+            
         return None
 
 db = GlamStoreDB()
