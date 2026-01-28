@@ -4,8 +4,10 @@ import requests
 import unicodedata
 import os
 import logging
+import random
 
-logging.basicConfig(level=logging.INFO)
+# Configuración de Logs Profesional
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
 class GlamStoreDB:
     def __init__(self):
@@ -15,14 +17,15 @@ class GlamStoreDB:
         self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
-        # Palabras que el buscador va a IGNORAR para no confundirse
+        # Stopwords: Palabras que el buscador debe ignorar para no confundirse
         self.palabras_basura = [
-            "hola", "buenos", "dias", "tardes", "noches",
-            "busco", "venden", "tienen", "quiero", "necesito", "comprar",
-            "precio", "valor", "cuanto", "vale", "cuesta",
-            "el", "la", "los", "las", "un", "una", "de", "del", "en", "que"
+            "hola", "buenos", "dias", "tardes", "busco", "venden", "tienen", 
+            "quiero", "necesito", "comprar", "precio", "valor", "cuanto", 
+            "vale", "cuesta", "ejemplo", "muestrame", "algun", "alguno", 
+            "articulo", "producto", "dato", "puedes", "dar", "me", "das"
         ]
         
+        # Iniciamos el trabajador en segundo plano
         hilo = threading.Thread(target=self._sincronizar_loop)
         hilo.daemon = True
         hilo.start()
@@ -30,31 +33,32 @@ class GlamStoreDB:
     def _sincronizar_loop(self):
         while True:
             try: self._actualizar_tabla_maestra()
-            except: pass
-            time.sleep(600)
+            except Exception as e: logging.error(f"⚠️ Error Sync: {e}")
+            time.sleep(600) # 10 minutos
 
     def _actualizar_tabla_maestra(self):
         if not self.shopify_token: return
+        
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
         url = f"https://{clean_url}/admin/api/2024-01/products.json"
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
         params = {"status": "active", "limit": 250}
         
         nueva_tabla = []
-        logging.info("🔄 Recopilando datos de Shopify...")
+        logging.info("🔄 DB: Iniciando sincronización...")
         
         while url:
             try:
-                time.sleep(1) # Respiro
-                r = requests.get(url, headers=headers, params=params, timeout=20)
+                time.sleep(0.5) # Pequeña pausa para estabilidad
+                r = requests.get(url, headers=headers, params=params, timeout=15)
                 if r.status_code != 200: break
                 
                 data = r.json().get("products", [])
                 for p in data:
                     try:
                         precio = float(p["variants"][0]["price"]) if p["variants"] else 0
-                        # Normalizamos el texto de búsqueda
-                        texto_sucio = f"{p['title']} {p.get('vendor','')} {p.get('tags','')}"
+                        # Creamos un texto de búsqueda enriquecido
+                        texto_sucio = f"{p['title']} {p.get('vendor','')} {p.get('product_type','')} {p.get('tags','')}"
                         texto_limpio = self._normalizar(texto_sucio)
                         
                         nueva_tabla.append({
@@ -73,54 +77,54 @@ class GlamStoreDB:
         if nueva_tabla:
             self.productos = nueva_tabla
             self.total_items = len(nueva_tabla)
-            logging.info(f"✅ Tabla Maestra: {self.total_items} productos.")
+            logging.info(f"✅ DB: Sincronizada con {self.total_items} productos.")
 
     def _normalizar(self, texto):
         if not texto: return ""
         return unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').lower()
 
-    def buscar_producto_rapido(self, consulta):
-        """
-        Buscador Inteligente:
-        1. Limpia la consulta (quita 'venden', 'busco').
-        2. Busca lo que queda.
-        """
+    # --- FUNCIONES DE ÉLITE ---
+
+    def obtener_recomendados(self, cantidad=5):
+        """Devuelve productos al azar para cuando el cliente pide 'ejemplos'"""
+        if not self.productos: return []
+        return random.sample(self.productos, min(cantidad, len(self.productos)))
+
+    def buscar_inteligente(self, consulta):
+        """Buscador que limpia la basura y busca coincidencias flexibles"""
         consulta_limpia = self._normalizar(consulta)
         palabras = consulta_limpia.split()
         
-        # FILTRO IMPORTANTE: Quitamos palabras basura
-        palabras_clave = [p for p in palabras if p not in self.palabras_basura]
+        # Filtramos palabras inútiles
+        keywords = [p for p in palabras if p not in self.palabras_basura]
         
-        # Si el cliente solo dijo "que venden" y borramos todo, devolvemos VACIO especial
-        if not palabras_clave:
-            return {"tipo": "VACIO", "motivo": "SOLO_STOPWORDS", "items": []}
+        if not keywords: 
+            return {"tipo": "VACIO", "motivo": "NO_KEYWORDS", "items": []}
             
         encontrados = []
-        
-        # 1. BÚSQUEDA EN RAM
+        # Buscamos en RAM
         if self.productos:
             for p in self.productos:
-                # Buscamos si TODAS las palabras clave (útiles) están en el producto
                 coincidencias = 0
-                for clave in palabras_clave:
-                    if clave in p['search_text']:
-                        coincidencias += 1
+                for kw in keywords:
+                    if kw in p['search_text']: coincidencias += 1
                 
-                if coincidencias == len(palabras_clave):
+                # Si coincide al menos con todas las palabras clave buscadas
+                if coincidencias >= len(keywords):
                     encontrados.append(p)
             
             if encontrados:
                 return {"tipo": "EXACTO", "items": encontrados[:5]}
 
-        return {"tipo": "VACIO", "items": []}
+        return {"tipo": "VACIO", "motivo": "SIN_STOCK", "items": []}
 
-    def crear_link_pago_seguro(self, texto_usuario):
-        # Usamos el mismo buscador inteligente para encontrar el producto
-        res = self.buscar_producto_rapido(texto_usuario)
-        if not res["items"]: return "NO_ENCONTRE_EXACTO"
+    def generar_checkout(self, texto_usuario):
+        # Intentamos encontrar el producto para vender
+        res = self.buscar_inteligente(texto_usuario)
+        if not res["items"]: return None
         
+        # Tomamos el primero
         producto = res["items"][0]
-        if not self.shopify_token: return "ERROR_CREDS"
         
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
@@ -128,8 +132,9 @@ class GlamStoreDB:
         try:
             payload = {"draft_order": {"line_items": [{"variant_id": producto['variant_id'], "quantity": 1}]}}
             r = requests.post(f"https://{clean_url}/admin/api/2024-01/draft_orders.json", headers=headers, json=payload)
-            if r.status_code == 201: return r.json().get("draft_order", {}).get("invoice_url")
+            if r.status_code == 201: 
+                return {"url": r.json().get("draft_order", {}).get("invoice_url"), "nombre": producto['title']}
         except: pass
-        return "ERROR_LINK"
+        return None
 
 db = GlamStoreDB()
