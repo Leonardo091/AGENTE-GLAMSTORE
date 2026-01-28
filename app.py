@@ -160,6 +160,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
             logging.info(f"✅ Productos encontrados ({len(res['items'])}). Forzando intención CATALOGO.")
             intencion = "CATALOGO"
             
+            # GUARDAR CONTEXTO PARA COMPRA RÁPIDA ("Quiero estos")
+            usuario['contexto_productos'] = res['items']
+            
             if res["tipo"] == "RECOMENDACION_REAL":
                 lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
                 contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
@@ -168,21 +171,32 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
             # Verificamos si quiere comprar explícitamente para el link (usamos lógica simple de keywords)
-            keywords_compra = ["comprar", "quiero", "llevo", "dame", "precio", "cuanto"]
+            keywords_compra = ["comprar", "quiero", "llevo", "dame", "precio", "cuanto", "me interesa"]
             if any(k in texto.lower() for k in keywords_compra):
                 # Generamos link
-                datos_link = db.generar_checkout(texto)
+                datos_link = db.generar_checkout(texto, productos_contexto=res['items'])
                 if datos_link:
                     link_pago = datos_link['url']
                     contexto_data += f"\n\nLINK DE PAGO YA GENERADO: {link_pago}"
                     intencion = "COMPRAR" # Refinamos
         
         else:
-            # NO hay productos -> Usamos LLM para detectar si es Charla o Soporte
-            contexto_data = "INVENTARIO: No encontré productos similares en el stock actual."
+            # NO hay productos nuevos. PERO... ¿Quiere comprar los anteriores?
+            keywords_compra_fuerte = ["comprar", "quiero", "llevo", "dame", "esos", "los 4", "todos", "interesa"]
+            if any(k in texto.lower() for k in keywords_compra_fuerte) and usuario.get('contexto_productos'):
+                logging.info(f"🛒 Intención de compra detectada sobre CONTEXTO ({len(usuario['contexto_productos'])} productos)")
+                datos_link = db.generar_checkout(texto, productos_contexto=usuario['contexto_productos'])
+                if datos_link:
+                    link_pago = datos_link['url']
+                    contexto_data = f"LINK DE PAGO GENERADO: {link_pago}\n(Para: {datos_link['nombre']})"
+                    intencion = "COMPRAR"
+            else:
+                # NO hay productos y no es compra de contexto -> Usamos LLM normal
+                contexto_data = "INVENTARIO: No encontré productos similares a esa búsqueda específica."
             
-            # 2. CLASIFICACIÓN DE INTENCIÓN (Solo si no hubo productos)
-            prompt_router = f"""
+            # 2. CLASIFICACIÓN DE INTENCIÓN (Solo si no hubo productos ni compra contextual)
+            if not intencion:
+                prompt_router = f"""
             Actúa como un clasificador de intenciones para una tienda de maquillaje y belleza llamada "GlamStore".
             Analiza el siguiente mensaje del cliente: "{texto}"
             
