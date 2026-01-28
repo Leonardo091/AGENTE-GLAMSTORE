@@ -211,6 +211,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         3. Si tienes una lista de productos, ofrécelos con sus precios.
         4. Si se generó un LINK DE PAGO en los datos, entrégaselo al cliente diciendo "Aquí tienes tu link directo:".
         5. Sé concisa. Respuestas de máximo 3-4 líneas a menos que sea una lista.
+        6. IMPORTANTE: Usa lenguaje de género NEUTRO o INCLUSIVO. Di "Bienvenid@" o "Te damos la bienvenida" en lugar de "Bienvenida". Atendemos a todo público.
         
         Chat previo:
         {historial_txt}
