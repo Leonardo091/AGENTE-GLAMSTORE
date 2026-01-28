@@ -77,9 +77,11 @@ def verificar_token():
 def recibir_mensajes():
     try:
         body = request.get_json()
+        logging.info(f"📨 WEBHOOK RECIBIDO (Raw): {body}")
         
         # Validación básica de estructura de WhatsApp
         if not body or "entry" not in body:
+            logging.warning("⚠️ Payload ignorado: No tiene 'entry'")
             return jsonify({"status": "ignored"}), 200
 
         entry = body["entry"][0]["changes"][0]["value"]
@@ -173,10 +175,11 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
 
         elif intencion == "SOPORTE":
             contexto_data = """
-            INFORMACIÓN DE LA TIENDA:
-            - Ubicación: Santo Domingo 240, Puente Alto.
-            - Horario de Atención: Lunes a Viernes 10:00 - 17:30 | Sábados 10:00 - 14:30.
-            - Envíos: A todo Chile (Starken/Chilexpress).
+            INFO TIENDA GLAMSTORE:
+            - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
+            - ⏰ Horario: Lun-Vie 10:00 a 18:00 hrs | Sáb 10:00 a 15:00 hrs.
+            - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
+            - 🚚 Envíos: A todo Chile (Starken/Chilexpress).
             """
 
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
