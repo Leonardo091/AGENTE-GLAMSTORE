@@ -127,67 +127,75 @@ def webhook():
 
 def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario):
     try:
-        # 1. INTENCIÓN
-        prompt_router = f"""
-        Actúa como un clasificador de intenciones para una tienda de maquillaje y belleza llamada "GlamStore".
-        Analiza el siguiente mensaje del cliente: "{texto}"
+        # --- ESTRATEGIA RETRIEVAL-FIRST ---
+        # 1. Buscamos PRIMERO en la base de datos (prioridad a productos)
+        logging.info(f"🔎 Buscando productos para: '{texto}'...")
+        res = db.buscar_contextual(texto)
         
-        Categorías posibles:
-        1. CATALOGO: Preguntan qué venden, piden recomendaciones, buscan un tipo de producto (labial, rimel, perfume).
-        2. COMPRAR: Quieren comprar algo específico, piden precio de un producto exacto, o piden link de pago.
-        3. SOPORTE: Preguntan envío, horario, ubicación, reclamos.
-        4. CHARLA: Saludos, agradecimientos, mensajes casuales.
-        
-        Historial reciente:
-        {historial_txt}
-        
-        Responde SOLO con una de las palabras: CATALOGO, COMPRAR, SOPORTE, CHARLA.
-        """
-        try:
-            intencion_raw = model.generate_content(prompt_router).text.strip().upper()
-            # Limpiar por si el modelo responde algo como "La categoría es CATALOGO"
-            if "CATALOGO" in intencion_raw: intencion = "CATALOGO"
-            elif "COMPRAR" in intencion_raw: intencion = "COMPRAR"
-            elif "SOPORTE" in intencion_raw: intencion = "SOPORTE"
-            else: intencion = "CHARLA"
-        except Exception as e:
-            logging.error(f"Error clasificando intención: {e}")
-            intencion = "CHARLA"
-
-        logging.info(f"🧠 Intención detectada: {intencion}")
-
-        # 2. DATA MINING (Buscar información relevante)
         contexto_data = ""
         link_pago = None
-        
-        if intencion in ["CATALOGO", "COMPRAR"]:
-            # Buscamos en la base de datos
-            res = db.buscar_contextual(texto)
+        intencion = None # Se define dinámicamente
+
+        if res["tipo"] != "VACIO":
+            # ¡HAY PRODUCTOS! -> Forzamos intención CATALOGO
+            logging.info(f"✅ Productos encontrados ({len(res['items'])}). Forzando intención CATALOGO.")
+            intencion = "CATALOGO"
             
-            if res["tipo"] == "VACIO":
-                contexto_data = "INVENTARIO: No encontré productos similares en el stock actual."
-            elif res["tipo"] == "RECOMENDACION_REAL":
+            if res["tipo"] == "RECOMENDACION_REAL":
                 lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
                 contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
             else: # EXACTO
                 lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
-                
-            if intencion == "COMPRAR" and res["items"]:
-                # Intentamos generar link solo si hay intención de compra clara
+
+            # Verificamos si quiere comprar explícitamente para el link (usamos lógica simple de keywords)
+            keywords_compra = ["comprar", "quiero", "llevo", "dame", "precio", "cuanto"]
+            if any(k in texto.lower() for k in keywords_compra):
+                # Generamos link
                 datos_link = db.generar_checkout(texto)
                 if datos_link:
                     link_pago = datos_link['url']
                     contexto_data += f"\n\nLINK DE PAGO YA GENERADO: {link_pago}"
-
-        elif intencion == "SOPORTE":
-            contexto_data = """
-            INFO TIENDA GLAMSTORE:
-            - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
-            - ⏰ Horario: Lun-Vie 10:00 a 18:00 hrs | Sáb 10:00 a 15:00 hrs.
-            - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
-            - 🚚 Envíos: A todo Chile (Starken/Chilexpress).
+                    intencion = "COMPRAR" # Refinamos
+        
+        else:
+            # NO hay productos -> Usamos LLM para detectar si es Charla o Soporte
+            contexto_data = "INVENTARIO: No encontré productos similares en el stock actual."
+            
+            # 2. CLASIFICACIÓN DE INTENCIÓN (Solo si no hubo productos)
+            prompt_router = f"""
+            Actúa como un clasificador de intenciones para una tienda de maquillaje y belleza llamada "GlamStore".
+            Analiza el siguiente mensaje del cliente: "{texto}"
+            
+            Categorías posibles:
+            1. SOPORTE: Preguntan envío, horario, ubicación, reclamos.
+            2. CHARLA: Saludos, agradecimientos, mensajes casuales, o preguntas de productos que NO tenemos.
+            3. CATALOGO: Preguntas generales de inventario (aunque ya sabemos que no hay stock).
+            
+            Historial reciente:
+            {historial_txt}
+            
+            Responde SOLO con una de las palabras: SOPORTE, CHARLA, CATALOGO.
             """
+            try:
+                intencion_raw = model.generate_content(prompt_router).text.strip().upper()
+                if "SOPORTE" in intencion_raw: intencion = "SOPORTE"
+                elif "CATALOGO" in intencion_raw: intencion = "CATALOGO"
+                else: intencion = "CHARLA"
+            except Exception as e:
+                logging.error(f"Error clasificando intención: {e}")
+                intencion = "CHARLA"
+
+            if intencion == "SOPORTE":
+                contexto_data = """
+                INFO TIENDA GLAMSTORE:
+                - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
+                - ⏰ Horario: Lun-Vie 10:00 a 18:00 hrs | Sáb 10:00 a 15:00 hrs.
+                - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
+                - 🚚 Envíos: A todo Chile (Starken/Chilexpress).
+                """
+
+        logging.info(f"🧠 Intención Final: {intencion}")
 
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         prompt_final = f"""
