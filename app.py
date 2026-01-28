@@ -217,6 +217,12 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         logging.info(f"🧠 Intención Final: {intencion}")
 
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
+        # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
+        instruccion_saludo = ""
+        # Solo saludamos si el historial es muy corto (inicio de conversación)
+        if len(usuario['historial']) < 2:
+             instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Bienvenid@" o "Te damos la bienvenida" SOLO si es el primer mensaje.'
+
         prompt_final = f"""
         Eres "GlamBot", la asesora experta de GlamStore Chile.
         Tu tono es: Amable, chic, profesional y útil. Usas emojis con moderación (💅, ✨, 💄).
@@ -226,11 +232,11 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         
         === INSTRUCCIONES ===
         1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
-        2. Si te preguntan por un producto y NO está en la lista de arriba, di amablemente que no queda stock por ahora. ¡No inventes productos!
-        3. Si tienes una lista de productos, ofrécelos con sus precios.
-        4. Si se generó un LINK DE PAGO en los datos, entrégaselo al cliente diciendo "Aquí tienes tu link directo:".
-        5. Sé concisa. Respuestas de máximo 3-4 líneas a menos que sea una lista.
-        6. IMPORTANTE: Usa lenguaje de género NEUTRO o INCLUSIVO. Di "Bienvenid@" o "Te damos la bienvenida" en lugar de "Bienvenida". Atendemos a todo público.
+        2. Si HAY productos: ¡LÍSTALOS DIRECTAMENTE! Di "Tengo estos para ti:" y pon la lista. ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS!
+        3. Si NO hay productos: Di que no hay stock por ahora e invita a redes sociales.
+        4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
+        5. Sé concisa (máximo 3-4 líneas).
+        {instruccion_saludo}
         
         Chat previo:
         {historial_txt}
@@ -248,8 +254,16 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         enviar_whatsapp(numero, resp_final)
 
     except Exception as e:
-        logging.error(f"Error procesando IA: {e}")
-        # Opcional: Enviar mensaje de error al usuario o fallar silenciosamente seguro
+        msg_error = str(e)
+        logging.error(f"Error procesando IA: {msg_error}")
+        
+        # Manejo específico de error de cuota (429)
+        if "429" in msg_error or "Resource exhausted" in msg_error:
+            mensaje_espera = "¡Ups! Estoy recibiendo muchísimos mensajes ahora mismo 🤯. Dame unos segundos y pregúntame de nuevo, por favor ✨."
+            enviar_whatsapp(numero, mensaje_espera)
+        else:
+            # Error genérico (opcionalmente no respondemos nada o un mensaje genérico)
+            pass
 
 def enviar_whatsapp(numero, texto):
     if not TOKEN_WHATSAPP:
