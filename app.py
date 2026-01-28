@@ -8,14 +8,19 @@ import google.generativeai as genai
 from collections import deque
 from database import db 
 
-logging.basicConfig(level=logging.INFO)
+# Logs limpios
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 app = Flask(__name__)
 
+# Credenciales
 TOKEN_WHATSAPP = os.environ.get("WHATSAPP_TOKEN")
 API_KEY_GEMINI = os.environ.get("GEMINI_API_KEY")
 
+# Memoria de corto plazo
 MEMORIA_USUARIOS = {}
 
+# --- UTILIDADES ---
 def despertar_render():
     while True:
         time.sleep(300)
@@ -27,20 +32,25 @@ hilo_ping = threading.Thread(target=despertar_render)
 hilo_ping.daemon = True
 hilo_ping.start()
 
-@app.route("/")
-def home():
-    try:
-        estado = "🟢 TABLA LISTA" if db.total_items > 0 else "⚠️ ESPERANDO DATOS"
-        return jsonify({"estado": estado, "total": db.total_items, "msg": "Filtro de palabras basura activo."}), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
-
-# Gemini
+# --- CONFIGURACIÓN IA ---
 model = None
 if API_KEY_GEMINI:
     genai.configure(api_key=API_KEY_GEMINI)
+    # Usamos flash-lite si existe, sino el flash normal
     try: model = genai.GenerativeModel('gemini-2.0-flash-lite')
     except: model = genai.GenerativeModel('gemini-1.5-flash')
 
+# --- RUTA PRINCIPAL ---
+@app.route("/")
+def home():
+    estado = "🟢 OPERATIVO" if db.total_items > 0 else "⚠️ CARGANDO INVENTARIO"
+    return jsonify({
+        "status": estado, 
+        "productos_en_ram": db.total_items, 
+        "mensaje": "Sistema Elite v4.0 Activo."
+    }), 200
+
+# --- CEREBRO DEL CHATBOT ---
 @app.route("/webhook", methods=["POST"])
 def recibir_mensajes():
     try:
@@ -55,91 +65,109 @@ def recibir_mensajes():
             
             logging.info(f"📩 {nombre}: {texto}")
 
+            # Gestión de Sesión
             ahora_ts = time.time()
             if numero not in MEMORIA_USUARIOS:
-                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=8), 'ultimo_msg': 0}
+                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=6), 'ultimo_msg': 0}
             usuario = MEMORIA_USUARIOS[numero]
             
-            debe_saludar = (ahora_ts - usuario['ultimo_msg'] > 7200) or (usuario['ultimo_msg'] == 0)
-            if any(s in texto.lower() for s in ["hola", "buenas"]): debe_saludar = True
-            usuario['ultimo_msg'] = ahora_ts
-            
-            historial_txt = "\n".join([f"- {h['rol']}: {h['txt']}" for h in usuario['historial']])
+            # Contexto Histórico
+            historial_txt = "\n".join([f"User: {h['txt']}\nBot: {h['resp']}" for h in usuario['historial']])
 
             if model:
-                # 1. CLASIFICACIÓN MEJORADA (Con Ejemplos para que no sea tonto)
-                prompt_det = f"""
-                Clasifica la intención del mensaje.
-                Mensaje: "{texto}"
-                Historial: {historial_txt}
-                
-                EJEMPLOS:
-                - "Quiero comprar el perfume yara", "mándame el link de pago" -> VENDER
-                - "¿Tienen perfumes?", "¿Qué venden?", "Precio del yara" -> INFO_PRODUCTO
-                - "Horario", "Ubicación", "Mayorista" -> INFO_TIENDA
-                - "Hola", "Gracias" -> CHARLA
-                
-                Responde SOLO UNA PALABRA: VENDER, INFO_PRODUCTO, INFO_TIENDA, CHARLA.
-                """
-                try: decision = model.generate_content(prompt_det).text.strip().split()[0]
-                except: decision = "CHARLA"
-
-                info_sistema = ""
-
-                # 2. LÓGICA DE DATOS
-                if "VENDER" in decision:
-                    link = db.crear_link_pago_seguro(texto)
-                    if "ERROR" in link or "NO_ENCONTRE" in link: 
-                        # Si falló el link, cambiamos estrategia a búsqueda normal
-                        info_sistema = "DATA: No pude generar link directo. Recomienda buscar el nombre exacto."
-                    else: info_sistema = f"DATA: Link generado: {link}"
-
-                elif "INFO_PRODUCTO" in decision:
-                    res = db.buscar_producto_rapido(texto)
-                    
-                    if res.get("motivo") == "SOLO_STOPWORDS":
-                        # Caso: "¿Qué venden?" -> El buscador borró todo y quedó vacío.
-                        info_sistema = "DATA_GENERAL: El cliente pregunta por catálogo general. Menciona Maquillaje, Perfumes (Árabes y tradicionales), Capilar."
-                    elif res["tipo"] == "VACIO":
-                        info_sistema = "DATA: 0 coincidencias en stock."
-                    else:
-                        items = ", ".join([f"{p['title']} (${p['price']:,.0f})" for p in res["items"]])
-                        info_sistema = f"DATA: Encontrados: {items}"
-
-                elif "INFO_TIENDA" in decision:
-                    info_sistema = "DATA: Ubicación: Santo Domingo 240, Puente Alto. Horario: Lun-Vie 10:00-17:30, Sab 10:00-14:30."
-
-                # 3. PROMPT MAESTRO (EL PUENTE)
-                prompt_final = f"""
-                Eres "GlamBot", asistente de Glamstore Chile.
-                
-                === INFORMACIÓN DEL SISTEMA (DATA REAL) ===
-                {info_sistema}
-                
-                === TUS REGLAS ===
-                1. SI LA DATA MUESTRA PRODUCTOS: Ofrécelos con sus precios.
-                2. SI LA DATA ES "0 COINCIDENCIAS": Di "Busqué en inventario y no encontré [Producto]. ¿Te interesa ver otra cosa?".
-                3. SI LA DATA ES GENERAL (¿Qué venden?): Di "Tenemos una gran variedad de Perfumes (Árabes y Tradicionales), Maquillaje y Cuidado Capilar.".
-                4. HORARIO: Lun-Vie 10:00 AM - 05:30 PM | Sab 10:00 AM - 02:30 PM.
-                5. NO inventes links.
-                6. { "Saluda cortésmente." if debe_saludar else "Ve directo al punto." }
-                
-                Chat: {historial_txt}
+                # --- PASO 1: LA IA DECIDE LA ESTRATEGIA (ROUTER) ---
+                prompt_router = f"""
+                Actúa como el cerebro de un eCommerce de Belleza.
                 Cliente: "{texto}"
+                Historial reciente: {historial_txt}
+                
+                Analiza la intención y clasifica en UNA de estas categorías:
+                
+                1. RECOMENDAR: El cliente pide "ejemplos", "qué venden", "dame un artículo", "muéstrame algo".
+                2. BUSCAR_ESPECIFICO: El cliente pide un producto concreto (ej: "tienes yara", "busco rimel").
+                3. GENERAR_LINK: El cliente dice explícitamente "quiero comprar esto", "dame el link", "lo llevo".
+                4. INFO_TIENDA: Horarios, ubicación, envíos, "tienen mayorista".
+                5. QUEJA_O_CHARLA: Saludos, "hablas feo", "no entiendo", quejas sobre el bot.
+                
+                Responde SOLO la categoría.
+                """
+                try: 
+                    intencion = model.generate_content(prompt_router).text.strip().upper()
+                except: 
+                    intencion = "CHARLA"
+                
+                logging.info(f"🧠 Intención detectada: {intencion}")
+
+                # --- PASO 2: RECOLECCIÓN DE DATOS (SEGÚN INTENCIÓN) ---
+                contexto_data = ""
+                
+                if "RECOMENDAR" in intencion:
+                    # Sacamos 5 productos al azar para vitrinear
+                    items = db.obtener_recomendados(5)
+                    lista = ", ".join([f"{p['title']} (${p['price']:,.0f})" for p in items])
+                    contexto_data = f"DATA DEL SISTEMA: Aquí tienes algunos productos destacados de nuestro stock: {lista}"
+                
+                elif "BUSCAR_ESPECIFICO" in intencion:
+                    res = db.buscar_inteligente(texto)
+                    if res["tipo"] == "VACIO":
+                        contexto_data = "DATA DEL SISTEMA: No encontré coincidencias exactas en el inventario."
+                    else:
+                        lista = ", ".join([f"{p['title']} (${p['price']:,.0f})" for p in res["items"]])
+                        contexto_data = f"DATA DEL SISTEMA: Encontré esto en stock: {lista}"
+                
+                elif "GENERAR_LINK" in intencion:
+                    checkout = db.generar_checkout(texto)
+                    if checkout:
+                        contexto_data = f"DATA DEL SISTEMA: Link generado exitosamente para '{checkout['nombre']}': {checkout['url']}"
+                    else:
+                        contexto_data = "DATA DEL SISTEMA: Error. No pude identificar qué producto quiere pagar. Pide el nombre exacto."
+                
+                elif "INFO_TIENDA" in intencion:
+                    contexto_data = """
+                    DATA DEL SISTEMA: 
+                    - Dirección: Santo Domingo 240, Puente Alto.
+                    - Horario: Lun-Vie 10:00 AM - 05:30 PM | Sáb 10:00 AM - 02:30 PM.
+                    - Mayorista: Solo presencial en tienda. Por aquí solo venta al detalle con link.
+                    - Envíos: Sí, a todo Chile.
+                    """
+
+                # --- PASO 3: GENERACIÓN DE RESPUESTA FINAL (EL COPYWRITER) ---
+                prompt_final = f"""
+                Eres "GlamBot", un vendedor experto, empático y profesional de Glamstore Chile.
+                
+                TU OBJETIVO: Vender y fidelizar.
+                TU PERSONALIDAD: Amable, paciente, usa emojis moderados ✨. JAMÁS suenes como un robot tonto ("No entiendo").
+                
+                INFORMACIÓN TÉCNICA (DATA):
+                {contexto_data}
+                
+                INSTRUCCIONES CLAVE POR CASO:
+                - Si el cliente se queja ("hablas feo", "tonto"): Pide disculpas con elegancia y di que estás aprendiendo para atenderle mejor.
+                - Si preguntan "¿Qué venden?" o "Dame un ejemplo": Usa la lista de productos destacados que te pasé en la DATA.
+                - Si preguntan por Mayorista: Di amable que por WhatsApp es solo detalle, pero que vaya a la tienda para precios mayoristas.
+                - Si la DATA dice "No encontré": Ofrece ayuda para buscar otra cosa similar.
+                - Si preguntan "Puedo comprar por acá": DI QUE SÍ. Generamos links de pago seguros.
+                
+                Chat previo:
+                {historial_txt}
+                
+                Cliente dice: "{texto}"
+                Respuesta de GlamBot:
                 """
                 
                 try:
-                    res = model.generate_content(prompt_final)
-                    respuesta = res.text.replace("Bot:", "").replace("GlamBot:", "").strip()
-                    if respuesta.startswith('"') and respuesta.endswith('"'): respuesta = respuesta[1:-1]
+                    resp_final = model.generate_content(prompt_final).text.strip()
+                    # Limpieza final por si acaso
+                    resp_final = resp_final.replace("Bot:", "").replace("GlamBot:", "").replace("Respuesta:", "")
                     
-                    usuario['historial'].append({"rol": nombre, "txt": texto})
-                    usuario['historial'].append({"rol": "Bot", "txt": respuesta})
+                    # Guardamos en memoria
+                    usuario['historial'].append({"txt": texto, "resp": resp_final})
                     
+                    # Enviamos
                     requests.post(
                         "https://graph.facebook.com/v21.0/939839529214459/messages",
                         headers={"Authorization": f"Bearer {TOKEN_WHATSAPP}", "Content-Type": "application/json"},
-                        json={"messaging_product": "whatsapp", "to": numero, "type": "text", "text": {"body": respuesta}}
+                        json={"messaging_product": "whatsapp", "to": numero, "type": "text", "text": {"body": resp_final}}
                     )
                 except Exception as e: logging.error(f"Error Gen: {e}")
 
