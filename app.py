@@ -398,6 +398,15 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         usuario['historial'].append({"txt": texto, "resp": resp_final})
         
         enviar_whatsapp(numero, resp_final)
+        
+        # --- ENVIAR IMAGEN DE TODOS LOS PRODUCTOS (VISUAL) ---
+        if intencion == "CATALOGO" and res["items"]:
+            # Enviamos imagen de cada producto (Máximo 5 para no saturar)
+            for p in res["items"][:5]:
+                if p.get("image_url"):
+                    logging.info(f"📸 Enviando imagen de: {p['title']}")
+                    enviar_imagen_whatsapp(numero, p["image_url"], f"📸 {p['title']}")
+
 
     except Exception as e:
         msg_error = str(e)
@@ -441,6 +450,27 @@ def enviar_whatsapp(numero, texto):
             logging.info(f"📤 Respuesta enviada a {numero}")
     except Exception as e:
         logging.error(f"Error request WhatsApp: {e}")
+
+def enviar_imagen_whatsapp(numero, media_url, caption=""):
+    """Envía una imagen por WhatsApp"""
+    if not TOKEN_WHATSAPP: return
+
+    url = f"https://graph.facebook.com/v21.0/{os.environ.get('META_PHONE_ID', '939839529214459')}/messages"
+    headers = {"Authorization": f"Bearer {TOKEN_WHATSAPP}", "Content-Type": "application/json"}
+    
+    data = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "image",
+        "image": {"link": media_url, "caption": caption}
+    }
+    
+    try:
+        r = requests.post(url, headers=headers, json=data)
+        if r.status_code not in [200, 201]:
+            logging.error(f"Error enviando imagen: {r.text}")
+    except Exception as e:
+        logging.error(f"Error env imagen: {e}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
