@@ -334,9 +334,10 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
 
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
-        instruccion_saludo = ""
-        # Solo saludamos si el historial es muy corto (inicio de conversación)
-        instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Hola" o "Bienvenid@" (con @).'
+        if len(usuario['historial']) < 2:
+            instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Hola" o "Bienvenid@" (con @) UNICA Y EXCLUSIVAMENTE al inicio.'
+        else:
+            instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo "Bienvenid@" si ya estamos hablando. Ve directo al grano.'
 
         prompt_final = f"""
         Eres parte del equipo de GlamstoreChile (NO digas que eres un bot/IA).
@@ -356,7 +357,8 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
         2. Si HAY productos: ¡LÍSTALOS DIRECTAMENTE! Di "Tengo estos para ti:" y pon la lista. ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS!
         3. Si NO hay productos:
-           - Si preguntan "qué venden" (general): Explica que tenemos lo mejor en Perfumería, Maquillaje, Cuidado Capilar y Accesorios. Pregunta qué categoría le interesa (NO inventes productos).
+           - Si preguntan "qué venden" (general): Usa una lista con viñetas para explicar las categorías: Perfumería, Maquillaje, Capilar, Accesorios. Pregunta qué le interesa.
+           - Si preguntan por MAYORISTA: Sé muy cálido y cercano. Di "¡Sí! Tenemos precios mayoristas fantásticos". Pregunta "¿Te interesaría comprar al por mayor?" para darte seguimiento. Solo si dice SÍ, entrega los contactos: +56 9 7207 9712 y glamstorechile2019@gmail.com.
            - Si preguntan por algo específico y no está: Discúlpate por el stock.
            - Si solo saludan: Responde el saludo.
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
@@ -366,7 +368,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
            - Sáb: 10:00 a 15:00 hrs
         {instruccion_saludo}
         7. ENVÍOS: Solo menciona "STARKEN". Si preguntan por otros, di que solo trabajamos con Starken por seguridad y rapidez.
-        8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA". Si es minorista, di que todo es 100% online y autogestionado por aquí.
+        8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA" confirmada. Si es minorista, di que todo es 100% online y autogestionado por aquí (salvo que quieran ir al local, que sí se puede).
         9. STOCK: Si te preguntan por algo que no está en la lista que ves, di que no queda stock. No inventes.
         
         Chat previo:
@@ -378,6 +380,17 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         resp_final = model.generate_content(prompt_final).text.strip()
         # Limpieza final
         resp_final = resp_final.replace("Bot:", "").replace("GlamBot:", "").strip()
+        
+        # --- ALERTA DE LEAD MAYORISTA ---
+        # Si el bot entregó los datos de contacto mayorista, avisamos al admin
+        if "7207 9712" in resp_final or "glamstorechile2019" in resp_final:
+            try:
+                logging.info("🚨 DETECTADO LEAD MAYORISTA - Enviando alerta...")
+                msg_alerta = f"🚨 *LEAD MAYORISTA DETECTADO*\nCliente: {nombre}\nTel: {numero}\nEstá interesado en comprar por mayor."
+                # Número admin hardcodeado según solicitud
+                enviar_whatsapp("56968123761", msg_alerta)
+            except Exception as e:
+                logging.error(f"Error enviando alerta mayorista: {e}")
         
         # Guardar en memoria
         usuario['historial'].append({"txt": texto, "resp": resp_final})
