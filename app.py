@@ -336,12 +336,18 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         instruccion_saludo = ""
         # Solo saludamos si el historial es muy corto (inicio de conversación)
-        if len(usuario['historial']) < 2:
-             instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Bienvenid@" o "Te damos la bienvenida" SOLO si es el primer mensaje.'
+        instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Hola" o "Bienvenid@" (con @).'
 
         prompt_final = f"""
-        Eres "GlamBot", la asesora experta de GlamStore Chile.
-        Tu tono es: Amable, chic, profesional y útil. Usas emojis con moderación (💅, ✨, 💄).
+        Eres parte del equipo de GlamstoreChile (NO digas que eres un bot/IA).
+        Tu tono es: Amable, profesional y útil.
+        AUDIENCIA: Atendemos a todo público (Hombres, Mujeres, Niños). No asumas género femenino por defecto.
+        
+        === CÓMO COMPRAR (TUS OPCIONES) ===
+        1. Web: www.glamstorechile.cl
+        2. Local Físico: Santo Domingo 240, Puente Alto (Interior "Sandros Collections"). ¡Sí se puede comprar ahí!
+        3. Aquí en el Chat: Tú generas los links de pago directo.
+        4. Mayorista: (Solo dar contacto si lo piden explícitamente).
         
         === DATOS DEL SISTEMA (TU VERDAD ABSOLUTA) ===
         {contexto_data}
