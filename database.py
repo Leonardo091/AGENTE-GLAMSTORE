@@ -58,7 +58,15 @@ class GlamStoreDB:
                 self._actualizar_tabla_maestra()
             except Exception as e:
                 logging.error(f"Error crítico en loop de sincronización: {e}")
-            time.sleep(600) 
+            
+            # RETRY INTELIGENTE:
+            # Si no tenemos productos (por error o arranque), reintentamos rápido (30s)
+            # Si ya tenemos productos (éxito), esperamos 10 min
+            if self.total_items == 0:
+                logging.info("⚠️ DB: Inventario vacío. Reintentando sincronización en 30 segundos...")
+                time.sleep(30)
+            else:
+                time.sleep(600) 
 
     def _actualizar_tabla_maestra(self):
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
