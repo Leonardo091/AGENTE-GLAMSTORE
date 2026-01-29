@@ -360,10 +360,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
            * [Nombre Producto] ($[Precio]) - [Ver aquí](https://glamstorechile.cl/products/[Handle])
            ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS! y si no tiene handle, no pongas link.
         3. Si NO hay productos:
-           - Si preguntan "qué venden" (general): Usa una lista con viñetas para explicar las categorías: Perfumería, Maquillaje, Capilar, Accesorios. Pregunta qué le interesa.
-           - Si preguntan por MAYORISTA: Sé muy cálido y cercano. Di "¡Sí! Tenemos precios mayoristas fantásticos". Pregunta "¿Te interesaría comprar al por mayor?" para darte seguimiento. Solo si dice SÍ, entrega los contactos: +56 9 7207 9712 y glamstorechile2019@gmail.com.
-           - Si preguntan por algo específico y no está: Discúlpate por el stock.
-           - Si solo saludan: Responde el saludo.
+           A) SI EL USUARIO SALUDA (Hola, Buenos días): ¡NO TE DISCULPES POR EL STOCK! Simplemente saluda con entusiasmo y pregunta "¿Qué buscas hoy?". NO des listas ni opciones aún.
+           B) SI PREGUNTAN "QUÉ VENDEN": Usa viñetas: Perfumería, Maquillaje, Capilar, Accesorios.
+           C) SI PREGUNTAN POR ALGO ESPECÍFICO Y NO ESTÁ: Ahí sí, discúlpate por el stock.
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
         5. FORMATO OPCIONES DE COMPRA: Usa SIEMPRE una lista numerada (1., 2., 3...) para que se lea ordenado.
         6. FORMATO HORARIOS: Usa lista:
