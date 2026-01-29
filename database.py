@@ -145,7 +145,7 @@ class GlamStoreDB:
             self.last_sync = datetime.now()
             self.sync_status = "OK"
             self.sync_error = None
-            logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
+            logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos. [INSTANCIA ID: {id(self)}]")
             
             # --- MUESTRA ALEATORIA DE CONTROL ---
             try:
