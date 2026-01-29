@@ -138,6 +138,22 @@ def webhook():
             historial_txt = "\n".join([f"User: {h['txt']}\nBot: {h['resp']}" for h in usuario['historial']])
 
             if model:
+                # --- AUTO-SYNC: GARANTIZAR DATOS FRESCOS ---
+                # Si el cerebro está vacío O la información es muy vieja (>20min), recargamos
+                necesita_recarga = False
+                msg_reason = ""
+                
+                if db.total_items == 0:
+                    necesita_recarga = True
+                    msg_reason = "Cerebro vacío"
+                elif db.last_sync and (datetime.now() - db.last_sync) > timedelta(minutes=20):
+                    necesita_recarga = True
+                    msg_reason = "Datos antiguos"
+                
+                if necesita_recarga:
+                    logging.info(f"🧠 {msg_reason} al recibir mensaje. Ejecutando sincronización síncrona...")
+                    db._actualizar_tabla_maestra()
+
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario)
             
         return jsonify({"status": "ok"}), 200
@@ -193,7 +209,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                         
                         Tu tarea: Identifica los ID de los productos que el usuario quiere comprar.
                         - Si quiere todo, responde: ["TODOS"]
+                        - Si quiere todo, responde: ["TODOS"]
                         - Si quiere uno o más específicos, responde una lista JSON con sus IDs: [12345, 67890]
+                        - IMPORTANTE: Si pide CANTIDAD (ej: "quiero 2 del primero"), REPITE el ID en la lista tantas veces como pida. Ej: [12345, 12345].
                         - Si solo está preguntando precios y no quiere link aún, responde: []
                         - Si no se entiende, responde: []
                         
@@ -335,6 +353,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
         5. Sé concisa (máximo 3-4 líneas).
         {instruccion_saludo}
+        7. ENVÍOS: Solo menciona "STARKEN". Si preguntan por otros, di que solo trabajamos con Starken por seguridad y rapidez.
+        8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA". Si es minorista, di que todo es 100% online y autogestionado por aquí.
+        9. STOCK: Si te preguntan por algo que no está en la lista que ves, di que no queda stock. No inventes.
         
         Chat previo:
         {historial_txt}
