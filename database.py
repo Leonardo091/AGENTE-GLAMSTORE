@@ -66,7 +66,7 @@ class GlamStoreDB:
                 logging.info("⚠️ DB: Inventario vacío. Reintentando sincronización en 30 segundos...")
                 time.sleep(30)
             else:
-                time.sleep(600) 
+                time.sleep(300) # 5 minutos 
 
     def _actualizar_tabla_maestra(self):
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
@@ -146,6 +146,15 @@ class GlamStoreDB:
             self.sync_status = "OK"
             self.sync_error = None
             logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
+            
+            # --- MUESTRA ALEATORIA DE CONTROL ---
+            try:
+                import random
+                p_sample = random.choice(self.productos)
+                logging.info(f"🎲 CONTROL DE CALIDAD: Muestra aleatoria -> '{p_sample['title']}' (${p_sample['price']:,.0f}) [ID: {p_sample['id']}]")
+            except Exception:
+                pass
+            # ------------------------------------
         else:
             # Si nueva_tabla está vacía pero NO hubo error (e.g. filtro de status), puede ser correcto.
             # Pero si hubo error de conexión, no borramos lo antiguo.
