@@ -63,7 +63,7 @@ class GlamStoreDB:
     def _actualizar_tabla_maestra(self):
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
         # API versionada (actualizada a una reciente estable)
-        url = f"https://{clean_url}/admin/api/2024-01/products.json"
+        url = f"https://{clean_url}/admin/api/2024-10/products.json"
         headers = {
             "X-Shopify-Access-Token": self.shopify_token, 
             "Content-Type": "application/json"
@@ -323,7 +323,7 @@ class GlamStoreDB:
                 }
             }
             
-            url = f"https://{clean_url}/admin/api/2024-01/draft_orders.json"
+            url = f"https://{clean_url}/admin/api/2024-10/draft_orders.json"
             r = requests.post(url, headers=headers, json=payload, timeout=10)
             
             if r.status_code == 201: 
