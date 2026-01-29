@@ -355,9 +355,15 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         === INSTRUCCIONES ===
         1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
         2. Si HAY productos: ¡LÍSTALOS DIRECTAMENTE! Di "Tengo estos para ti:" y pon la lista. ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS!
-        3. Si NO hay productos: SOLO di que no hay stock SI el usuario preguntó por un producto. Si solo saluda o conversa, NO hables de stock.
+        3. Si NO hay productos:
+           - Si preguntan "qué venden" (general): Explica que tenemos lo mejor en Perfumería, Maquillaje, Cuidado Capilar y Accesorios. Pregunta qué categoría le interesa (NO inventes productos).
+           - Si preguntan por algo específico y no está: Discúlpate por el stock.
+           - Si solo saludan: Responde el saludo.
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
-        5. Sé concisa (máximo 3-4 líneas).
+        5. FORMATO OPCIONES DE COMPRA: Usa SIEMPRE una lista numerada (1., 2., 3...) para que se lea ordenado.
+        6. FORMATO HORARIOS: Usa lista:
+           - Lun-Vie: 10:00 a 18:00 hrs
+           - Sáb: 10:00 a 15:00 hrs
         {instruccion_saludo}
         7. ENVÍOS: Solo menciona "STARKEN". Si preguntan por otros, di que solo trabajamos con Starken por seguridad y rapidez.
         8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA". Si es minorista, di que todo es 100% online y autogestionado por aquí.
