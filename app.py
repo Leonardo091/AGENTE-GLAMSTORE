@@ -204,6 +204,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         contexto_data = ""
         link_pago = None
         intencion = None # Se define dinámicamente
+        mostrar_imagenes = True # Por defecto sí, salvo que estemos en resumen
 
         # 1. Buscamos PRIMERO en la base de datos (prioridad a productos)
         # --- FILTRO ANTICIPADO PARA PREGUNTAS DE SOPORTE ---
@@ -264,6 +265,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                      INSTRUCCION CLAVE: NO muestres lista de productos aún. Dile al cliente los precios que tenemos y pregúntale cuál presupuesto prefiere o qué valor busca.
                      """
                      logging.info("📊 Aplicando clustering de precios (>4 items).")
+                     mostrar_imagenes = False # NO enviar imágenes en fase de resumen
                 else:
                     lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
                     contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
@@ -516,13 +518,14 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         enviar_whatsapp(numero, resp_final)
         
         # --- ENVIAR IMAGEN DE TODOS LOS PRODUCTOS (VISUAL) ---
-        if intencion == "CATALOGO" and res["items"]:
+        if intencion == "CATALOGO" and res["items"] and mostrar_imagenes:
             # Enviamos imagen de cada producto (Máximo 5 para no saturar)
             for p in res["items"][:5]:
                 if p.get("image_url"):
                     logging.info(f"📸 Enviando imagen de: {p['title']}")
                     # Capturamos respuesta para guardar ID
-                    resp_api = enviar_imagen_whatsapp(numero, p["image_url"], f"📸 {p['title']}")
+                    caption_txt = f"📸 {p['title']} - ${p['price']:,.0f}".replace(",", ".")
+                    resp_api = enviar_imagen_whatsapp(numero, p["image_url"], caption_txt)
                     
                     if resp_api:
                         try:
