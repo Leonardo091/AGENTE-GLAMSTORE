@@ -188,8 +188,18 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         es_soporte = any(k in texto.lower() for k in keywords_soporte)
         
         if es_soporte and not producto_foco:
-             logging.info("ℹ️ Detectada pregunta de soporte/info. Omitiendo búsqueda de productos.")
+             logging.info("ℹ️ Detectada pregunta de soporte/info. Omitiendo búsqueda de productos y forzando SOPORTE.")
              res = {"items": [], "tipo": "VACIO"}
+             intencion = "SOPORTE" # FORZAR SOPORTE DURO
+             
+             # Pre-llenar contexto básico para asegurar que el prompt tenga info
+             contexto_data = """
+                INFO TIENDA GLAMSTORE:
+                - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
+                - ⏰ Horario: Lun-Vie 10:00 a 17:30 hrs | Sáb 10:00 a 14:30 hrs.
+                - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
+                - 🚚 Envíos: SOLO POR STARKEN.
+                """
         else:
             logging.info(f"🔎 Buscando productos para: '{texto}'...")
             res = db.buscar_contextual(texto)
@@ -425,8 +435,8 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
         5. FORMATO OPCIONES DE COMPRA: Usa SIEMPRE una lista numerada (1., 2., 3...) para que se lea ordenado.
         6. FORMATO HORARIOS: Usa lista:
-           - Lun-Vie: 10:00 a 18:00 hrs
-           - Sáb: 10:00 a 15:00 hrs
+           - Lun-Vie: 10:00 a 17:30 hrs
+           - Sáb: 10:00 a 14:30 hrs
         {instruccion_saludo}
         7. ENVÍOS: Solo menciona "STARKEN". Si preguntan por otros, di que solo trabajamos con Starken por seguridad y rapidez.
         8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA" confirmada. Si es minorista, di que todo es 100% online y autogestionado por aquí (salvo que quieran ir al local, que sí se puede).
