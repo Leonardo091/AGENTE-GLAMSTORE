@@ -488,6 +488,11 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         - ENVÍOS: Solo "STARKEN (Por pagar)".
         
         {instruccion_saludo}
+        
+        Chat previo:
+        {historial_txt}
+        User: "{texto}"
+        Bot:
         """
         
         resp_final = model.generate_content(prompt_final).text.strip()
