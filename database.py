@@ -128,6 +128,7 @@ class GlamStoreDB:
                 self.sync_status = "Error en conexión"
                 self.sync_error = str(e)
                 logging.error(f"Error de conexión con Shopify: {e}")
+                # No romper el bucle, solo reintentar en 10 min
                 break
         
         if nueva_tabla:
@@ -137,16 +138,19 @@ class GlamStoreDB:
             self.sync_status = "OK"
             self.sync_error = None
             logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
-            
-            # --- LOG DE MUESTRA PARA DEBUG ---
-            if self.productos:
-                p = self.productos[0]
-                logging.info(f"🔍 MUESTRA DE DATO (Producto 1): Title='{p['title']}' | Search='{p['search_text']}'")
-            # ---------------------------------
         else:
-            if not self.productos:
-                self.sync_status = "Alerta: Inventario Vacio"
-            logging.warning("⚠️ DB: No se descargaron productos (o la lista estaba vacía). Manteniendo caché anterior.")
+            # Si nueva_tabla está vacía pero NO hubo error (e.g. filtro de status), puede ser correcto.
+            # Pero si hubo error de conexión, no borramos lo antiguo.
+            if self.sync_error:
+                 logging.warning("⚠️ DB: Hubo error en sincronización. Manteniendo caché anterior.")
+            else:
+                # Si realmente no descargó nada y no hubo error, borramos o mantenemos? 
+                # Mejor mantener por seguridad si ya había algo
+                if self.productos:
+                     logging.warning("⚠️ DB: Shopify devolvió 0 productos. ¿Error de credenciales o tienda vacía? Manteniendo caché por seguridad.")
+                else:
+                    self.sync_status = "Alerta: Inventario Vacio (Credenciales OK, pero 0 items)"
+                    logging.warning("⚠️ DB: Tienda vacía o filtro incorrecto.")
 
     def _normalizar(self, texto):
         if not texto: return ""
@@ -246,7 +250,10 @@ class GlamStoreDB:
         return {"tipo": "VACIO", "items": []}
 
     def generar_checkout(self, texto_usuario, productos_contexto=None):
-        """Genera un Draft Order en Shopify y retorna el link de pago."""
+        """
+        LEGACY: Genera checkout intentando adivinar. 
+        Mantenido por compatibilidad, pero idealmente usar generar_checkout_especifico.
+        """
         if not self.shopify_token or not self.shopify_url:
             return None
 
@@ -264,22 +271,47 @@ class GlamStoreDB:
 
         if not items_a_comprar:
             return None
+            
+        return self._crear_draft_order(items_a_comprar)
+
+    def generar_checkout_especifico(self, ids_seleccionados, contexto_total):
+        """
+        Genera checkout SOLAMENTE con los IDs especificados.
+        """
+        if not ids_seleccionados: return None
         
+        # Filtrar del contexto los que coincidan con los IDs
+        items_finales = []
+        for p in contexto_total:
+            # Convertimos a string por si acaso vienen tipos mixtos
+            if str(p['id']) in [str(x) for x in ids_seleccionados]:
+                items_finales.append(p)
+                
+        if not items_finales:
+            return None
+            
+        return self._crear_draft_order(items_finales)
+
+    def _crear_draft_order(self, items):
+        """Función interna reutilizable para crear la orden en Shopify"""
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
         headers = {
             "X-Shopify-Access-Token": self.shopify_token, 
             "Content-Type": "application/json"
         }
         
-        # Construir line_items para TODOS los productos identificados
+        # Construir line_items
         line_items = []
         nombres_productos = []
-        for p in items_a_comprar:
+        total_aprox = 0
+        
+        for p in items:
             line_items.append({
                 "variant_id": p['variant_id'], 
                 "quantity": 1
             })
             nombres_productos.append(p['title'])
+            total_aprox += p['price']
             
         # Crear la orden borrador (Draft Order)
         try:
@@ -298,7 +330,9 @@ class GlamStoreDB:
                 data = r.json().get("draft_order", {})
                 return {
                     "url": data.get("invoice_url"), # URL de pago directo
-                    "nombre": ", ".join(nombres_productos)
+                    "nombre": ", ".join(nombres_productos),
+                    "total": total_aprox,
+                    "items": items # Retornamos los items para hacer el resumen
                 }
             else:
                 logging.error(f"Error creando orden Shopify: {r.text}")
