@@ -130,9 +130,16 @@ def webhook():
             texto = msg.get("text", {}).get("body", "")
             nombre = entry.get("contacts", [{}])[0].get("profile", {}).get("name", "Cliente")
             
+            # Contexto (Reply)
+            msg_context_id = msg.get("context", {}).get("id")
+
             # Gestión de memoria
             if numero not in MEMORIA_USUARIOS:
-                MEMORIA_USUARIOS[numero] = {'historial': deque(maxlen=6), 'ultimo_msg': time.time()}
+                MEMORIA_USUARIOS[numero] = {
+                    'historial': deque(maxlen=6), 
+                    'ultimo_msg': time.time(),
+                    'msg_map': {} # Para rastrear IDs de mensajes -> productos
+                }
             usuario = MEMORIA_USUARIOS[numero]
             
             historial_txt = "\n".join([f"User: {h['txt']}\nBot: {h['resp']}" for h in usuario['historial']])
@@ -154,7 +161,7 @@ def webhook():
                     logging.info(f"🧠 {msg_reason} al recibir mensaje. Ejecutando sincronización síncrona...")
                     db._actualizar_tabla_maestra()
 
-                procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario)
+                procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id)
             
         return jsonify({"status": "ok"}), 200
     except Exception as e:
@@ -162,10 +169,18 @@ def webhook():
         return jsonify({"status": "error"}), 500
 
 
-
-def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario):
+def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id=None):
     try:
         # --- ESTRATEGIA RETRIEVAL-FIRST ---
+        
+        # 0. CHECK CONTEXTO (REPLY)
+        producto_foco = None
+        if msg_context_id and 'msg_map' in usuario:
+            # Buscar si el mensaje respondido corresponde a un producto enviado
+            if msg_context_id in usuario['msg_map']:
+                producto_foco = usuario['msg_map'][msg_context_id]
+                logging.info(f"📍 Contexto detectado: Usuario responde a producto ID {producto_foco['id']} ({producto_foco['title']})")
+        
         # 1. Buscamos PRIMERO en la base de datos (prioridad a productos)
         logging.info(f"🔎 Buscando productos para: '{texto}'...")
         res = db.buscar_contextual(texto)
@@ -173,6 +188,20 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         contexto_data = ""
         link_pago = None
         intencion = None # Se define dinámicamente
+
+        # Si hay un producto foco (Reply), lo inyectamos como "lo encontrado" si la búsqueda normal falló o es ambigua
+        # Ojo: Si el usuario responde a una foto diciendo "tienen en rojo?", deberíamos combinar.
+        # Por ahora simplificamos: Si responde a un producto, ESE es el tema.
+        if producto_foco:
+            # Sobreescribimos comportamiento si es intención de compra clara sobre "este"
+            keywords_referencia = ["este", "ese", "quiero", "llevo", "dame", "precio", "cuanto", "comprar"]
+            if any(k in texto.lower() for k in keywords_referencia):
+                logging.info("🎯 Usando producto foco por Reply.")
+                res["items"] = [producto_foco]
+                res["tipo"] = "EXACTO" # Simulamos que lo encontró
+            
+            # También lo agregamos al contexto visual para que el selector funcione si menciona otros
+            usuario['contexto_productos'] = [producto_foco]
 
         if res["tipo"] != "VACIO":
             # ¡HAY PRODUCTOS! -> Forzamos intención CATALOGO
@@ -198,21 +227,23 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 # Si hay varios productos, preguntamos a Gemini cuál elegir
                 items_a_checkout = res['items']
                 
-                if len(res['items']) > 1:
+                # SI HAY FOCO POR REPLY, saltamos la duda
+                if producto_foco:
+                     items_a_checkout = [producto_foco]
+                elif len(res['items']) > 1:
                     try:
                         prompt_selector = f"""
                         Eres un experto en entender pedidos de compra.
                         El usuario dijo: "{texto}"
                         
                         Productos disponibles en pantalla:
-                        Productos disponibles en pantalla:
                         {json.dumps([{'id': p['id'], 'title': p['title'], 'handle': p.get('handle', '')} for p in res['items']], ensure_ascii=False)}
                         
                         Tu tarea: Identifica los ID de los productos que el usuario quiere comprar.
                         - Si quiere todo, responde: ["TODOS"]
-                        - Si quiere todo, responde: ["TODOS"]
                         - Si quiere uno o más específicos, responde una lista JSON con sus IDs: [12345, 67890]
                         - IMPORTANTE: Si pide CANTIDAD (ej: "quiero 2 del primero"), REPITE el ID en la lista tantas veces como pida. Ej: [12345, 12345].
+                        - Si dice "este" o "ese" y NO especificó nombre (y hay varios productos), es AMBIGUO. Responde: ["AMBIGUO"]
                         - Si solo está preguntando precios y no quiere link aún, responde: []
                         - Si no se entiende, responde: []
                         
@@ -225,31 +256,45 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                         
                         seleccion = json.loads(selector_resp)
                         
-                        if "TODOS" not in seleccion and seleccion:
+                        if "AMBIGUO" in seleccion:
+                            # Caso ambiguo: No generamos link, dejamos que el flujo normal pregunte
+                            logging.info("🤔 Selección ambigua. Pidiendo aclaración.")
+                            contexto_data = "Por favor, dime explícitamente cuál producto quieres (nombre o precio) para generarte el link correcto. 😅"
+                            intencion = "CHARLA" # Para que no fuerce compra
+                            items_a_checkout = [] # Reset
+                        elif "TODOS" not in seleccion and seleccion:
                             # Filtrar solo los seleccionados
                             items_a_checkout = [p for p in res['items'] if p['id'] in seleccion]
-                            
+                            # Expandir duplicados para handlear cantidades
+                            items_expandidos = []
+                            for id_sel in seleccion:
+                                for p in res['items']:
+                                    if p['id'] == id_sel:
+                                        items_expandidos.append(p)
+                                        break
+                            if items_expandidos:
+                                items_a_checkout = items_expandidos
+
                     except Exception as e:
                         logging.error(f"Error en selector inteligente: {e}")
-                        # Si falla, por defecto NO generamos link masivo, mejor dejar que el usuario especifique o
-                        # usar el comportamiento anterior (pero el usuario reportó que era molesto).
-                        # Vamos a asumir que "TODOS" es el fallback si falla la IA, pero lo ideal es ser precavido.
+                        # Fallback seguro: Preferible no hacer nada a cobrar mal
                         items_a_checkout = res['items'] 
 
-                # Generamos link SOLO con los seleccionados
-                datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], res['items'])
-                
-                if datos_link:
-                    link_pago = datos_link['url']
+                # Generamos link SOLO si hay items seleccionados y no fue ambiguo
+                if items_a_checkout and intencion != "CHARLA":
+                    datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], res['items'])
                     
-                    # Generar Resumen
-                    resumen_txt = "📝 *Resumen del Pedido:*\n"
-                    for p in datos_link['items']:
-                        resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
-                    resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
-                    
-                    contexto_data += f"\n\n{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
-                    intencion = "COMPRAR" # Refinamos
+                    if datos_link:
+                        link_pago = datos_link['url']
+                        
+                        # Generar Resumen
+                        resumen_txt = "📝 *Resumen del Pedido:*\n"
+                        for p in datos_link['items']:
+                            resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
+                        resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
+                        
+                        contexto_data += f"\n\n{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
+                        intencion = "COMPRAR" # Refinamos
         
         else:
             # NO hay productos nuevos. PERO... ¿Quiere comprar los anteriores del contexto?
@@ -261,38 +306,44 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 items_ctx = usuario['contexto_productos']
                 items_a_checkout = items_ctx
                 
-                # (Aquí podríamos llamar al LLMSelector igual que arriba si quisiéramos ser muy precisos en "dame el segundo")
-                # Por simplicidad y ahorro de tokens en render, si dice "quiero esos", asumimos todos SALVO que especifique.
-                # Si dice "quiero el perfume" y había 5 cosas, vendría bien el selector.
-                # Implementemos el selector simplificado aquí también:
-                
                 try:
                     prompt_selector = f"""
                     Usuario: "{texto}"
                     Items en vista: {json.dumps([{'id': p['id'], 'title': p['title']} for p in items_ctx], ensure_ascii=False)}
-                    Devuelve JSON con IDs a comprar o ["TODOS"].
+                    Devuelve JSON con IDs a comprar (repite si pide cantidad) o ["TODOS"] o ["AMBIGUO"] si no es claro cual.
                     """
                     selector_resp = model.generate_content(prompt_selector).text.strip().replace("```json", "").replace("```", "").strip()
                     seleccion = json.loads(selector_resp)
                     
-                    if "TODOS" not in seleccion and seleccion:
-                        items_a_checkout = [p for p in items_ctx if p['id'] in seleccion]
+                    if "AMBIGUO" in seleccion:
+                        logging.info("🤔 Selección contexto ambigua.")
+                        contexto_data = "¡Claro! Pero tengo varios productos en mente. ¿Cuál de ellos prefieres? 👇"
+                        intencion = "CHARLA"
+                        items_a_checkout = []
+                    elif "TODOS" not in seleccion and seleccion:
+                        items_a_checkout = []
+                        for id_sel in seleccion:
+                             for p in items_ctx:
+                                 if p['id'] == id_sel:
+                                     items_a_checkout.append(p)
+                                     break
                 except:
                     pass # Fallback a todos
                 
-                datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], items_ctx)
-                
-                if datos_link:
-                    link_pago = datos_link['url']
+                if items_a_checkout and intencion != "CHARLA":
+                    datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], items_ctx)
                     
-                    # Resumen
-                    resumen_txt = "📝 *Resumen de lo que viste:*\n"
-                    for p in datos_link['items']:
-                        resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
-                    resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
-                    
-                    contexto_data = f"{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
-                    intencion = "COMPRAR"
+                    if datos_link:
+                        link_pago = datos_link['url']
+                        
+                        # Resumen
+                        resumen_txt = "📝 *Resumen de lo que viste:*\n"
+                        for p in datos_link['items']:
+                            resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
+                        resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
+                        
+                        contexto_data = f"{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
+                        intencion = "COMPRAR"
             else:
                 # NO hay productos y no es compra de contexto -> Usamos LLM normal
                 contexto_data = "INVENTARIO: No encontré productos similares a esa búsqueda específica."
@@ -335,29 +386,26 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
 
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
-        if len(usuario['historial']) < 2:
-            instruccion_saludo = '6. IMPORTANTE: Usa lenguaje de género NEUTRO. Di "Hola" o "Bienvenid@" (con @) UNICA Y EXCLUSIVAMENTE al inicio.'
+        if len(usuario['historial']) == 0:
+            instruccion_saludo = '6. IMPORTANTE: Saluda con "Hola" o "Bienvenido/a".'
         else:
-            instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo "Bienvenid@" si ya estamos hablando. Ve directo al grano.'
+            instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo. Ve directo al grano.'
 
         prompt_final = f"""
         Eres parte del equipo de GlamstoreChile (NO digas que eres un bot/IA).
         Tu tono es: Amable, profesional y útil.
-        AUDIENCIA: Atendemos a todo público (Hombres, Mujeres, Niños). No asumas género femenino por defecto.
-        
-        === CÓMO COMPRAR (TUS OPCIONES) ===
-        1. Web: www.glamstorechile.cl
-        2. Local Físico: Santo Domingo 240, Puente Alto (Interior "Sandros Collections"). ¡Sí se puede comprar ahí!
-        3. Aquí en el Chat: Tú generas los links de pago directo.
-        4. Mayorista: (Solo dar contacto si lo piden explícitamente).
+        ESTILO VSUAL: Usa emojis ✨💄💅 de forma moderada pero constante para dar dinamismo y calidez.
+        AUDIENCIA: Atendemos a todo público. No asumas que el cliente es mujer (evita "amiga", "reina").
+        LENGUAJE: Usa español estándar. Refiérete a la tienda como "nosotros". JAMÁS uses lenguaje inclusivo modificado (ej: "nosotres", "amigues", "todxs").
         
         === DATOS DEL SISTEMA (TU VERDAD ABSOLUTA) ===
         {contexto_data}
         
         === INSTRUCCIONES ===
         1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
-        2. Si HAY productos: Lístalos con este formato EXACTO (incluyendo el link):
-           * [Nombre Producto] ($[Precio]) - [Ver aquí](https://glamstorechile.cl/products/[Handle])
+        2. Si HAY productos: Lístalos con este formato EXACTO (WhatsApp NO soporta links ocultos, pon la URL abajo):
+           * ✨ [Nombre Producto] - $[Precio]
+             🔗 [URL]
            ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS! y si no tiene handle, no pongas link.
         3. Si NO hay productos:
            A) SI EL USUARIO SALUDA (Hola, Buenos días): ¡NO TE DISCULPES POR EL STOCK! Simplemente saluda con entusiasmo y pregunta "¿Qué buscas hoy?". NO des listas ni opciones aún.
@@ -405,7 +453,20 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
             for p in res["items"][:5]:
                 if p.get("image_url"):
                     logging.info(f"📸 Enviando imagen de: {p['title']}")
-                    enviar_imagen_whatsapp(numero, p["image_url"], f"📸 {p['title']}")
+                    # Capturamos respuesta para guardar ID
+                    resp_api = enviar_imagen_whatsapp(numero, p["image_url"], f"📸 {p['title']}")
+                    
+                    if resp_api:
+                        try:
+                            # Estructura típica: {'messaging_product': 'whatsapp', 'contacts': [...], 'messages': [{'id': 'wamid.HBg...'}]}
+                            wamid = resp_api.get('messages', [{}])[0].get('id')
+                            if wamid:
+                                if 'msg_map' not in usuario:
+                                    usuario['msg_map'] = {}
+                                usuario['msg_map'][wamid] = p
+                                logging.info(f"💾 Guardado contexto msg {wamid} -> Product {p['id']}")
+                        except Exception as e:
+                            logging.error(f"Error guardando contexto msg: {e}")
 
 
     except Exception as e:
@@ -446,14 +507,17 @@ def enviar_whatsapp(numero, texto):
         r = requests.post(url, headers=headers, json=data)
         if r.status_code not in [200, 201]:
             logging.error(f"Error enviando a WhatsApp: {r.text}")
+            return None
         else:
             logging.info(f"📤 Respuesta enviada a {numero}")
+            return r.json()
     except Exception as e:
         logging.error(f"Error request WhatsApp: {e}")
+        return None
 
 def enviar_imagen_whatsapp(numero, media_url, caption=""):
-    """Envía una imagen por WhatsApp"""
-    if not TOKEN_WHATSAPP: return
+    """Envía una imagen por WhatsApp y retorna la respuesta API (para obtener ID)"""
+    if not TOKEN_WHATSAPP: return None
 
     url = f"https://graph.facebook.com/v21.0/{os.environ.get('META_PHONE_ID', '939839529214459')}/messages"
     headers = {"Authorization": f"Bearer {TOKEN_WHATSAPP}", "Content-Type": "application/json"}
@@ -469,8 +533,12 @@ def enviar_imagen_whatsapp(numero, media_url, caption=""):
         r = requests.post(url, headers=headers, json=data)
         if r.status_code not in [200, 201]:
             logging.error(f"Error enviando imagen: {r.text}")
+            return None
+        else:
+            return r.json()
     except Exception as e:
         logging.error(f"Error env imagen: {e}")
+        return None
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
