@@ -389,7 +389,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         if len(usuario['historial']) == 0:
             instruccion_saludo = '6. IMPORTANTE: Saluda con "Hola" o "Bienvenido/a".'
         else:
-            instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo. Ve directo al grano.'
+            instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo. NO digas "Hola" ni "Bienvenido". RESPONDE DIRECTO.'
 
         prompt_final = f"""
         Eres parte del equipo de GlamstoreChile (NO digas que eres un bot/IA).
@@ -408,9 +408,11 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
              🔗 [URL]
            ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS! y si no tiene handle, no pongas link.
         3. Si NO hay productos:
-           A) SI EL USUARIO SALUDA (Hola, Buenos días): ¡NO TE DISCULPES POR EL STOCK! Simplemente saluda con entusiasmo y pregunta "¿Qué buscas hoy?". NO des listas ni opciones aún.
+           A) SI EL USUARIO SALUDA (Hola, Buenos días): ¡NO TE DISCULPES POR EL STOCK! Simplemente saluda con entusiasmo.
            B) SI PREGUNTAN "QUÉ VENDEN": Usa viñetas: Perfumería, Maquillaje, Capilar, Accesorios.
-           C) SI PREGUNTAN POR ALGO ESPECÍFICO Y NO ESTÁ: Ahí sí, discúlpate por el stock.
+           C) SI PREGUNTAN "DÓNDE ESTÁN" o "UBICACIÓN": Da la dirección de Santo Domingo 240, Puente Alto.
+           D) SI PREGUNTAN "HORARIO" o "CUÁNDO ATIENDEN": Da los horarios.
+           E) SI PREGUNTAN POR ALGO ESPECÍFICO Y NO ESTÁ: Ahí sí, discúlpate por el stock.
         4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
         5. FORMATO OPCIONES DE COMPRA: Usa SIEMPRE una lista numerada (1., 2., 3...) para que se lea ordenado.
         6. FORMATO HORARIOS: Usa lista:
