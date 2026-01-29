@@ -54,7 +54,9 @@ def home():
     return jsonify({
         "status": "ONLINE", 
         "productos_cargados": db.total_items, 
-        "mensaje": "El cerebro de GlamStore está activo 💅"
+        "mensaje": "El cerebro de GlamStore está activo 💅",
+        "debug_pid": os.getpid(),
+        "debug_db_id": id(db)
     }), 200
 
 @app.route("/debug/inventory", methods=["GET"])
