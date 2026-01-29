@@ -182,8 +182,17 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 logging.info(f"📍 Contexto detectado: Usuario responde a producto ID {producto_foco['id']} ({producto_foco['title']})")
         
         # 1. Buscamos PRIMERO en la base de datos (prioridad a productos)
-        logging.info(f"🔎 Buscando productos para: '{texto}'...")
-        res = db.buscar_contextual(texto)
+        # --- FILTRO ANTICIPADO PARA PREGUNTAS DE SOPORTE ---
+        # Si preguntan "dónde venden", "cuándo atienden", "qué venden", NO buscar productos semánticamente con "venden".
+        keywords_soporte = ["donde", "dónde", "ubicacion", "ubicación", "calle", "lugar", "horario", "hora", "cuando", "cuándo", "telefono", "celular", "que venden", "qué venden"]
+        es_soporte = any(k in texto.lower() for k in keywords_soporte)
+        
+        if es_soporte and not producto_foco:
+             logging.info("ℹ️ Detectada pregunta de soporte/info. Omitiendo búsqueda de productos.")
+             res = {"items": [], "tipo": "VACIO"}
+        else:
+            logging.info(f"🔎 Buscando productos para: '{texto}'...")
+            res = db.buscar_contextual(texto)
         
         contexto_data = ""
         link_pago = None
