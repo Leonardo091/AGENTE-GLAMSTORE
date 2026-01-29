@@ -99,6 +99,17 @@ class GlamStoreDB:
                     try:
                         # Solo procesamos si tiene variantes
                         if not p.get("variants"): continue
+                        
+                        # --- FILTRO DE STOCK ---
+                        v_primaria = p["variants"][0]
+                        policy = v_primaria.get("inventory_policy", "deny")
+                        qty = v_primaria.get("inventory_quantity", 0)
+                        
+                        # Si gestiona inventario (shopify) y no permite continuar sin stock (deny) y qty <= 0 -> SALTAR
+                        if v_primaria.get("inventory_management") == "shopify" and policy == "deny" and qty <= 0:
+                           # logging.info(f"Saltando {p['title']} por falta de stock.")
+                           continue
+
 
                         # Precio de la primera variante (precio base)
                         precio = float(p["variants"][0]["price"])
@@ -145,7 +156,7 @@ class GlamStoreDB:
             self.last_sync = datetime.now()
             self.sync_status = "OK"
             self.sync_error = None
-            logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos. [INSTANCIA ID: {id(self)}]")
+            logging.info(f"✅ DB: Inventario actualizado. {self.total_items} productos listos.")
             
             # --- MUESTRA ALEATORIA DE CONTROL ---
             try:
@@ -299,10 +310,16 @@ class GlamStoreDB:
         
         # Filtrar del contexto los que coincidan con los IDs
         items_finales = []
-        for p in contexto_total:
-            # Convertimos a string por si acaso vienen tipos mixtos
-            if str(p['id']) in [str(x) for x in ids_seleccionados]:
-                items_finales.append(p)
+        
+        # 2026-01-29: Lógica "repeater" para cantidades (ej: si ID aparece 2 veces, se agrega 2 veces)
+        # Primero indexamos el contexto para búsqueda rápida
+        mapa_contexto = {str(p['id']): p for p in contexto_total}
+        
+        for id_sel in ids_seleccionados:
+            s_id = str(id_sel)
+            if s_id in mapa_contexto:
+                # Agregamos UNA COPIA del producto por cada vez que aparezca el ID
+                items_finales.append(mapa_contexto[s_id])
                 
         if not items_finales:
             return None
