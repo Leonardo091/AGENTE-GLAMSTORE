@@ -169,6 +169,26 @@ def webhook():
         return jsonify({"status": "error"}), 500
 
 
+def _segmentar_precios(items):
+    """Agrupa productos por valor redondeado (cluster) para resumen natural."""
+    precios = []
+    for p in items:
+        try:
+            # Redondear a mil más cercano (ej: 4500 -> 5000, 14990 -> 15000)
+            precio = round(p['price'] / 1000) * 1000
+            precios.append(precio)
+        except:
+            continue
+    
+    if not precios: return ""
+    
+    # Obtener valores únicos ordenados
+    valores_unicos = sorted(list(set(precios)))
+    
+    # Formatear
+    txt_valores = ", ".join([f"${v:,.0f}".replace(",", ".") for v in valores_unicos])
+    return f"Tenemos opciones de {txt_valores}"
+
 def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id=None):
     try:
         # --- ESTRATEGIA RETRIEVAL-FIRST ---
@@ -181,10 +201,14 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 producto_foco = usuario['msg_map'][msg_context_id]
                 logging.info(f"📍 Contexto detectado: Usuario responde a producto ID {producto_foco['id']} ({producto_foco['title']})")
         
+        contexto_data = ""
+        link_pago = None
+        intencion = None # Se define dinámicamente
+
         # 1. Buscamos PRIMERO en la base de datos (prioridad a productos)
         # --- FILTRO ANTICIPADO PARA PREGUNTAS DE SOPORTE ---
         # Si preguntan "dónde venden", "cuándo atienden", "qué venden", NO buscar productos semánticamente con "venden".
-        keywords_soporte = ["donde", "dónde", "ubicacion", "ubicación", "calle", "lugar", "horario", "hora", "cuando", "cuándo", "telefono", "celular", "que venden", "qué venden"]
+        keywords_soporte = ["donde", "dónde", "ubicacion", "ubicación", "calle", "lugar", "horario", "hora", "cuando", "cuándo", "telefono", "celular", "que venden", "qué venden", "mayorista"]
         es_soporte = any(k in texto.lower() for k in keywords_soporte)
         
         if es_soporte and not producto_foco:
@@ -198,15 +222,13 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
                 - ⏰ Horario: Lun-Vie 10:00 a 17:30 hrs | Sáb 10:00 a 14:30 hrs.
                 - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
-                - 🚚 Envíos: SOLO POR STARKEN.
+                - 🚚 Envíos: SOLO POR STARKEN (Por pagar).
+                - 💼 Mayorista: "Hola, para compras mayoristas por favor escríbenos directo al +56972079712 y te enviamos el catálogo especial". (SOLO DAR ESTO SI PIDEN MAYORISTA).
                 """
         else:
             logging.info(f"🔎 Buscando productos para: '{texto}'...")
             res = db.buscar_contextual(texto)
         
-        contexto_data = ""
-        link_pago = None
-        intencion = None # Se define dinámicamente
 
         # Si hay un producto foco (Reply), lo inyectamos como "lo encontrado" si la búsqueda normal falló o es ambigua
         # Ojo: Si el usuario responde a una foto diciendo "tienen en rojo?", deberíamos combinar.
@@ -231,14 +253,26 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
             usuario['contexto_productos'] = res['items']
             
             if res["tipo"] == "RECOMENDACION_REAL":
-                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
-                contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
+                # CLUSTERING DE PRECIOS (> 4 productos)
+                if len(res["items"]) > 4:
+                     # Generamos solo resumen de precios
+                     resumen_precios = _segmentar_precios(res["items"])
+                     contexto_data = f"""
+                     INVENTARIO ENCONTRADO (RESUMEN):
+                     {resumen_precios}
+                     
+                     INSTRUCCION CLAVE: NO muestres lista de productos aún. Dile al cliente los precios que tenemos y pregúntale cuál presupuesto prefiere o qué valor busca.
+                     """
+                     logging.info("📊 Aplicando clustering de precios (>4 items).")
+                else:
+                    lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
+                    contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
             else: # EXACTO
                 lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
-            # Verificamos si quiere comprar explícitamente
-            keywords_compra = ["comprar", "quiero", "llevo", "dame", "precio", "cuanto", "me interesa"]
+            # Verificamos si quiere comprar explícitamente (SOLO INTENCION FIRME)
+            keywords_compra = ["comprar este", "llevo esto", "generame el link", "dame el link", "link de pago", "pagar ahora"]
             
             # Si detectamos intención de compra o pregunta de precio sobre estos productos
             if any(k in texto.lower() for k in keywords_compra):
@@ -396,14 +430,13 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 contexto_data = """
                 INFO TIENDA GLAMSTORE:
                 - 📍 Ubicación Exacta: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
-                - ⏰ Horario: Lun-Vie 10:00 a 18:00 hrs | Sáb 10:00 a 15:00 hrs.
+                - ⏰ Horario: Lun-Vie 10:00 a 17:30 hrs | Sáb 10:00 a 14:30 hrs.
                 - 📞 Contacto: +56 9 7207 9712 | glamstorechile2019@gmail.com
-                - 🚚 Envíos: A todo Chile (Starken/Chilexpress).
+                - 🚚 Envíos: SOLO POR STARKEN (Por pagar).
                 """
 
         logging.info(f"🧠 Intención Final: {intencion}")
 
-        # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         # 3. GENERACIÓN DE RESPUESTA (Prompt Búnker)
         if len(usuario['historial']) == 0:
             instruccion_saludo = '6. IMPORTANTE: Saluda con "Hola" o "Bienvenido/a".'
@@ -411,41 +444,48 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
             instruccion_saludo = '6. IMPORTANTE: NO saludes de nuevo. NO digas "Hola" ni "Bienvenido". RESPONDE DIRECTO.'
 
         prompt_final = f"""
-        Eres parte del equipo de GlamstoreChile (NO digas que eres un bot/IA).
-        Tu tono es: Amable, profesional y útil.
-        ESTILO VSUAL: Usa emojis ✨💄💅 de forma moderada pero constante para dar dinamismo y calidez.
-        AUDIENCIA: Atendemos a todo público. No asumas que el cliente es mujer (evita "amiga", "reina").
-        LENGUAJE: Usa español estándar. Refiérete a la tienda como "nosotros". JAMÁS uses lenguaje inclusivo modificado (ej: "nosotres", "amigues", "todxs").
+        Eres parte del equipo de GlamstoreChile. 
+        TU MISIÓN: Ser una asesora de ventas EXPERTA y CONSULTIVA. 
+        NO VENDAS DE INMEDIATO. TU OBJETIVO ES AYUDAR A ELEGIR, NO SOLO FACTURAR.
+        
+        ESTILO VISUAL: Usa emojis ✨💄💅 de forma moderada.
+        LENGUAJE: Español estándar, neutro y profesional. "Nosotros". Cero adjetivos exagerados (no digas "increíble", "premium", "barato"). Solo datos y valores.
         
         === DATOS DEL SISTEMA (TU VERDAD ABSOLUTA) ===
         {contexto_data}
         
-        === INSTRUCCIONES ===
-        1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
-        2. Si HAY productos: Lístalos con este formato EXACTO (WhatsApp NO soporta links ocultos, pon la URL abajo):
-           * ✨ [Nombre Producto] - $[Precio]
+        === FLUJO DE VENTA OBLIGATORIO ===
+        1. OMITIR LINK: JAMÁS generes, inventes ni muestres un link de pago. Eso lo hace el sistema automáticamente si el usuario confirma compra explícita. TÚ SOLO CHARLAS Y MUESTRAS PRODUCTOS.
+        
+        2. ANTE PREGUNTAS GENERALES ("Quiero perfumes", "Qué maquillaje tienes"):
+           - SI EL SISTEMA TE DA UN RESUMEN DE PRECIOS: Di EXACTAMENTE: "Tenemos opciones de [listar precios]. ¿En qué valor buscas aprox?".
+           - NO MUESTRES LISTAS DE PRODUCTOS AUN. Espera que el usuario filtre por precio.
+        
+        3. ANTE FILTRO DE PRECIO ("Menos de 10.000", "Los de 5.000"):
+           - Ahí recién muestra los productos que coinciden con su filtro.
+           - Formato de lista: 
+             * ✨ [Nombre] - $[Precio]
              🔗 [URL]
-           ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS! y si no tiene handle, no pongas link.
-        3. Si NO hay productos:
-           A) SI EL USUARIO SALUDA (Hola, Buenos días): ¡NO TE DISCULPES POR EL STOCK! Simplemente saluda con entusiasmo.
-           B) SI PREGUNTAN "QUÉ VENDEN": Usa viñetas: Perfumería, Maquillaje, Capilar, Accesorios.
-           C) SI PREGUNTAN "DÓNDE ESTÁN" o "UBICACIÓN": Da la dirección de Santo Domingo 240, Puente Alto.
-           D) SI PREGUNTAN "HORARIO" o "CUÁNDO ATIENDEN": Da los horarios.
-           E) SI PREGUNTAN POR ALGO ESPECÍFICO Y NO ESTÁ: Ahí sí, discúlpate por el stock.
-        4. Si hay LINK DE PAGO: Entrégalo diciendo "Aquí tienes tu link directo:".
-        5. FORMATO OPCIONES DE COMPRA: Usa SIEMPRE una lista numerada (1., 2., 3...) para que se lea ordenado.
-        6. FORMATO HORARIOS: Usa lista:
+           - PREGUNTA DE CIERRE: "¿Te gustaría agregar alguno a tu pedido?".
+        
+        4. CIERRE DE VENTA:
+           - Si el usuario dice "Quiero el X", "Agrega este": Confirma "Agregado".
+           - SOLO cuando diga "Link" o "Pagar": Diles: "Perfecto. Te genero el link.".
+        
+        === OPCIONES DE COMPRA ===
+        1. Página Web: www.glamstorechile.cl (24/7).
+        2. Aquí mismo (Glambot): Link de pago seguro y rápido.
+        3. Tienda Física: Santo Domingo 240, Puente Alto (Interior "Sandros Collections").
+        
+        === SOPORTE ===
+        - Si preguntan DÓNDE/UBICACIÓN: Da la dirección exacta. NO inventes productos.
+        - Si preguntan HORARIO/CUANDO:
            - Lun-Vie: 10:00 a 17:30 hrs
            - Sáb: 10:00 a 14:30 hrs
-        {instruccion_saludo}
-        7. ENVÍOS: Solo menciona "STARKEN". Si preguntan por otros, di que solo trabajamos con Starken por seguridad y rapidez.
-        8. CONTACTO: Si piden teléfono/dirección SOLO entrégalos si su intención es "COMPRA MAYORISTA" confirmada. Si es minorista, di que todo es 100% online y autogestionado por aquí (salvo que quieran ir al local, que sí se puede).
-        9. STOCK: Si te preguntan por algo que no está en la lista que ves, di que no queda stock. No inventes.
+        - Si preguntan MAYORISTA: Da el mensaje de contacto directo del sistema.
+        - ENVÍOS: Solo "STARKEN (Por pagar)".
         
-        Chat previo:
-        {historial_txt}
-        User: "{texto}"
-        Bot:
+        {instruccion_saludo}
         """
         
         resp_final = model.generate_content(prompt_final).text.strip()
