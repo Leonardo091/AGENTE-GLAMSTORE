@@ -399,7 +399,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                         intencion = "COMPRAR"
             else:
                 # NO hay productos y no es compra de contexto -> Usamos LLM normal
-                contexto_data = "INVENTARIO: No encontré productos similares a esa búsqueda específica."
+                # SOLO sobrescribimos si no traemos ya una intención (como SOPORTE) que definió su propio contexto
+                if not intencion:
+                    contexto_data = "INVENTARIO: No encontré productos similares a esa búsqueda específica."
             
             # 2. CLASIFICACIÓN DE INTENCIÓN (Solo si no hubo productos ni compra contextual)
             if not intencion:
