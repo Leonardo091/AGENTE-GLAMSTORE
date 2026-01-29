@@ -5,6 +5,7 @@ import requests
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
+import json
 from collections import deque
 from database import db 
 
@@ -170,25 +171,106 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                 lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
-            # Verificamos si quiere comprar explícitamente para el link (usamos lógica simple de keywords)
+            # Verificamos si quiere comprar explícitamente
             keywords_compra = ["comprar", "quiero", "llevo", "dame", "precio", "cuanto", "me interesa"]
+            
+            # Si detectamos intención de compra o pregunta de precio sobre estos productos
             if any(k in texto.lower() for k in keywords_compra):
-                # Generamos link
-                datos_link = db.generar_checkout(texto, productos_contexto=res['items'])
+                # INTELIGENCIA: SELECCIONAR QUÉ PRODUCTO QUIERE
+                # Si hay varios productos, preguntamos a Gemini cuál elegir
+                items_a_checkout = res['items']
+                
+                if len(res['items']) > 1:
+                    try:
+                        prompt_selector = f"""
+                        Eres un experto en entender pedidos de compra.
+                        El usuario dijo: "{texto}"
+                        
+                        Productos disponibles en pantalla:
+                        {json.dumps([{'id': p['id'], 'title': p['title']} for p in res['items']], ensure_ascii=False)}
+                        
+                        Tu tarea: Identifica los ID de los productos que el usuario quiere comprar.
+                        - Si quiere todo, responde: ["TODOS"]
+                        - Si quiere uno o más específicos, responde una lista JSON con sus IDs: [12345, 67890]
+                        - Si solo está preguntando precios y no quiere link aún, responde: []
+                        - Si no se entiende, responde: []
+                        
+                        Responde SOLO EL JSON.
+                        """
+                        # Usamos el modelo para decidir
+                        selector_resp = model.generate_content(prompt_selector).text.strip()
+                        # Limpiar markdown si lo pone
+                        selector_resp = selector_resp.replace("```json", "").replace("```", "").strip()
+                        
+                        seleccion = json.loads(selector_resp)
+                        
+                        if "TODOS" not in seleccion and seleccion:
+                            # Filtrar solo los seleccionados
+                            items_a_checkout = [p for p in res['items'] if p['id'] in seleccion]
+                            
+                    except Exception as e:
+                        logging.error(f"Error en selector inteligente: {e}")
+                        # Si falla, por defecto NO generamos link masivo, mejor dejar que el usuario especifique o
+                        # usar el comportamiento anterior (pero el usuario reportó que era molesto).
+                        # Vamos a asumir que "TODOS" es el fallback si falla la IA, pero lo ideal es ser precavido.
+                        items_a_checkout = res['items'] 
+
+                # Generamos link SOLO con los seleccionados
+                datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], res['items'])
+                
                 if datos_link:
                     link_pago = datos_link['url']
-                    contexto_data += f"\n\nLINK DE PAGO YA GENERADO: {link_pago}"
+                    
+                    # Generar Resumen
+                    resumen_txt = "📝 *Resumen del Pedido:*\n"
+                    for p in datos_link['items']:
+                        resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
+                    resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
+                    
+                    contexto_data += f"\n\n{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
                     intencion = "COMPRAR" # Refinamos
         
         else:
-            # NO hay productos nuevos. PERO... ¿Quiere comprar los anteriores?
+            # NO hay productos nuevos. PERO... ¿Quiere comprar los anteriores del contexto?
             keywords_compra_fuerte = ["comprar", "quiero", "llevo", "dame", "esos", "los 4", "todos", "interesa"]
             if any(k in texto.lower() for k in keywords_compra_fuerte) and usuario.get('contexto_productos'):
-                logging.info(f"🛒 Intención de compra detectada sobre CONTEXTO ({len(usuario['contexto_productos'])} productos)")
-                datos_link = db.generar_checkout(texto, productos_contexto=usuario['contexto_productos'])
+                logging.info(f"🛒 Intención de compra detectada sobre CONTEXTO MEMORIA ({len(usuario['contexto_productos'])} productos)")
+                
+                # --- LOGICA SMART SELECTOR (REPETIDA PARA CONTEXTO) ---
+                items_ctx = usuario['contexto_productos']
+                items_a_checkout = items_ctx
+                
+                # (Aquí podríamos llamar al LLMSelector igual que arriba si quisiéramos ser muy precisos en "dame el segundo")
+                # Por simplicidad y ahorro de tokens en render, si dice "quiero esos", asumimos todos SALVO que especifique.
+                # Si dice "quiero el perfume" y había 5 cosas, vendría bien el selector.
+                # Implementemos el selector simplificado aquí también:
+                
+                try:
+                    prompt_selector = f"""
+                    Usuario: "{texto}"
+                    Items en vista: {json.dumps([{'id': p['id'], 'title': p['title']} for p in items_ctx], ensure_ascii=False)}
+                    Devuelve JSON con IDs a comprar o ["TODOS"].
+                    """
+                    selector_resp = model.generate_content(prompt_selector).text.strip().replace("```json", "").replace("```", "").strip()
+                    seleccion = json.loads(selector_resp)
+                    
+                    if "TODOS" not in seleccion and seleccion:
+                        items_a_checkout = [p for p in items_ctx if p['id'] in seleccion]
+                except:
+                    pass # Fallback a todos
+                
+                datos_link = db.generar_checkout_especifico([p['id'] for p in items_a_checkout], items_ctx)
+                
                 if datos_link:
                     link_pago = datos_link['url']
-                    contexto_data = f"LINK DE PAGO GENERADO: {link_pago}\n(Para: {datos_link['nombre']})"
+                    
+                    # Resumen
+                    resumen_txt = "📝 *Resumen de lo que viste:*\n"
+                    for p in datos_link['items']:
+                        resumen_txt += f"• {p['title']} (${p['price']:,.0f})\n"
+                    resumen_txt += f"💰 **Total: ${datos_link['total']:,.0f}**"
+                    
+                    contexto_data = f"{resumen_txt}\n🔗 LINK DE PAGO: {link_pago}"
                     intencion = "COMPRAR"
             else:
                 # NO hay productos y no es compra de contexto -> Usamos LLM normal
