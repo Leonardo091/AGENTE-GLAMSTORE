@@ -130,6 +130,7 @@ class GlamStoreDB:
                             "id": p["id"],
                             "title": p["title"],
                             "price": precio,
+                            "handle": p.get("handle", ""),
                             "search_text": texto_limpio,
                             "variant_id": p["variants"][0]["id"]
                         })
