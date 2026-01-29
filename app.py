@@ -183,10 +183,10 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
             usuario['contexto_productos'] = res['items']
             
             if res["tipo"] == "RECOMENDACION_REAL":
-                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
+                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
                 contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
             else: # EXACTO
-                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f})" for p in res["items"]])
+                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
             # Verificamos si quiere comprar explícitamente
@@ -205,7 +205,8 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                         El usuario dijo: "{texto}"
                         
                         Productos disponibles en pantalla:
-                        {json.dumps([{'id': p['id'], 'title': p['title']} for p in res['items']], ensure_ascii=False)}
+                        Productos disponibles en pantalla:
+                        {json.dumps([{'id': p['id'], 'title': p['title'], 'handle': p.get('handle', '')} for p in res['items']], ensure_ascii=False)}
                         
                         Tu tarea: Identifica los ID de los productos que el usuario quiere comprar.
                         - Si quiere todo, responde: ["TODOS"]
@@ -355,7 +356,9 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         
         === INSTRUCCIONES ===
         1. Responde al cliente {nombre} basándote SOLO en los "DATOS DEL SISTEMA".
-        2. Si HAY productos: ¡LÍSTALOS DIRECTAMENTE! Di "Tengo estos para ti:" y pon la lista. ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS!
+        2. Si HAY productos: Lístalos con este formato EXACTO (incluyendo el link):
+           * [Nombre Producto] ($[Precio]) - [Ver aquí](https://glamstorechile.cl/products/[Handle])
+           ⛔ PROHIBIDO PREGUNTAR "¿Te gustaría verlos?". ¡MUÉSTRALOS! y si no tiene handle, no pongas link.
         3. Si NO hay productos:
            - Si preguntan "qué venden" (general): Usa una lista con viñetas para explicar las categorías: Perfumería, Maquillaje, Capilar, Accesorios. Pregunta qué le interesa.
            - Si preguntan por MAYORISTA: Sé muy cálido y cercano. Di "¡Sí! Tenemos precios mayoristas fantásticos". Pregunta "¿Te interesaría comprar al por mayor?" para darte seguimiento. Solo si dice SÍ, entrega los contactos: +56 9 7207 9712 y glamstorechile2019@gmail.com.
