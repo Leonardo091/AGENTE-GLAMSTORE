@@ -28,7 +28,8 @@ class GlamStoreDB:
             "vale", "cuesta", "ejemplo", "muestrame", "algun", "alguno", 
             "articulo", "producto", "dato", "puedes", "dar", "me", "das",
             "recomendar", "recomendarias", "para", "mi", "hija", "mama", "regalo",
-            "glamstore", "tienda", "gracias", "favor", "por"
+            "glamstore", "tienda", "gracias", "favor", "por",
+            "el", "la", "los", "las", "un", "una", "de", "del", "que", "en", "y", "o"
         }
         
         # Iniciar sincronización en segundo plano solo si hay credenciales
