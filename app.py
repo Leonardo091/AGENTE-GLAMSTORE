@@ -270,9 +270,8 @@ def webhook():
                     # Respondemos inmediatamente para no matar el webhook por timeout
                     # El usuario recibirá respuesta cuando reintente o si el bot pudiera responder luego (complejo)
                     # Por ahora, simplemente evitamos el crash.
-                    if intencion != "SOPORTE": # Si es soporte igual puede responder
-                         enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto y pregúntame de nuevo, por favor. 🙏")
-                         return jsonify({"status": "warming_up"}), 200
+                    enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto y pregúntame de nuevo, por favor. 🙏")
+                    return jsonify({"status": "warming_up"}), 200
 
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id)
             
@@ -283,24 +282,24 @@ def webhook():
 
 
 def _segmentar_precios(items):
-    """Agrupa productos por valor redondeado (cluster) para resumen natural."""
-    precios = []
+    """Obtiene PRECIOS EXACTOS únicos para mostrar variedad real sin aproximar."""
+    precios = set()
     for p in items:
         try:
-            # Redondear a mil más cercano (ej: 4500 -> 5000, 14990 -> 15000)
-            precio = round(p['price'] / 1000) * 1000
-            precios.append(precio)
+            # Usar valor exacto (entero).
+            precio = int(p['price'])
+            precios.add(precio)
         except:
             continue
     
     if not precios: return ""
     
-    # Obtener valores únicos ordenados
-    valores_unicos = sorted(list(set(precios)))
+    # Ordenar menor a mayor
+    valores_unicos = sorted(list(precios))
     
-    # Formatear
+    # Formato "$500, $750, $1.000, $12.990"
     txt_valores = ", ".join([f"${v:,.0f}".replace(",", ".") for v in valores_unicos])
-    return f"Tenemos opciones de {txt_valores}"
+    return f"Valores: {txt_valores}"
 
 def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id=None):
     try:
