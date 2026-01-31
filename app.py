@@ -210,12 +210,21 @@ def webhook():
                         enviar_whatsapp(numero, f"✅ Sync iniciada/completada.\nEstado: {st['estado_sincronizacion']}\nTotal: {st['total_productos']}")
                         
                     elif "email" in texto:
-                        enviar_whatsapp(numero, "📧 Generando reporte CSV y enviando...")
-                        csv_data = db.exportar_csv_str()
-                        if enviar_reporte_email(csv_data):
-                            enviar_whatsapp(numero, "✅ Correo enviado exitosamente.")
-                        else:
-                            enviar_whatsapp(numero, "❌ Error enviando correo. Revisa logs.")
+                        enviar_whatsapp(numero, "📧 Generando reporte CSV y enviando... (Esto puede tardar unos segundos)")
+                        
+                        def tarea_email():
+                            try:
+                                csv_data = db.exportar_csv_str()
+                                if enviar_reporte_email(csv_data):
+                                    enviar_whatsapp(numero, "✅ Correo enviado exitosamente.")
+                                else:
+                                    enviar_whatsapp(numero, "❌ Error enviando correo. Revisa logs.")
+                            except Exception as e:
+                                logging.error(f"Error hilo email: {e}")
+                                enviar_whatsapp(numero, "❌ Error interno generando reporte.")
+
+                        threading.Thread(target=tarea_email).start()
+                        return jsonify({"status": "command_executed_async"}), 200
                     
                     elif "buscar" in texto:
                         q = texto.replace("!db buscar", "").strip()
@@ -552,6 +561,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         Eres parte del equipo de GlamstoreChile. 
         TU MISIÓN: Ser una asesora de ventas EXPERTA y CONSULTIVA. 
         NO VENDAS DE INMEDIATO. TU OBJETIVO ES AYUDAR A ELEGIR, NO SOLO FACTURAR.
+        SI PREGUNTAN QUÉ VENDEMOS: Menciona siempre Maquillaje, Perfumes, Skin Care, Capilar y Accesorios.
         
         ESTILO VISUAL: Usa emojis ✨💄💅 de forma moderada.
         LENGUAJE: Español estándar, neutro y profesional. "Nosotros". Cero adjetivos exagerados (no digas "increíble", "premium", "barato"). Solo datos y valores.
@@ -563,7 +573,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         1. OMITIR LINK: JAMÁS generes, inventes ni muestres un link de pago. Eso lo hace el sistema automáticamente si el usuario confirma compra explícita. TÚ SOLO CHARLAS Y MUESTRAS PRODUCTOS.
         
         2. ANTE PREGUNTAS GENERALES ("Quiero perfumes", "Qué maquillaje tienes"):
-           - SI EL SISTEMA TE DA UN RESUMEN DE PRECIOS: Di EXACTAMENTE: "Tenemos opciones de [listar precios]. ¿En qué valor buscas aprox?".
+           - SI EL SISTEMA TE DA UN RESUMEN DE PRECIOS: Lista los precios o rangos disponibles de forma natural (ej: "$2.000, $5.000 y $15.000").
            - NO MUESTRES LISTAS DE PRODUCTOS AUN. Espera que el usuario filtre por precio.
         
         3. ANTE FILTRO DE PRECIO ("Menos de 10.000", "Los de 5.000"):
