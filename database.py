@@ -159,30 +159,56 @@ class GlamStoreDB:
         
         try:
             pagina = 1
+            todos_valid_ids = []  # Acumulador de IDs válidos de TODAS las páginas
+            
             while url:
                 r = requests.get(url, headers=headers, params=params, timeout=20)
                 if r.status_code != 200:
                     logging.error(f"❌ Shopify Error: {r.status_code}")
                     break
                 
-                items = r.json().get("products", [])
+                # Track valid IDs
+                valid_ids = []
+
                 for p in items:
                     if not p.get("variants"): continue
                     
-                    # Datos principales
-                    v1 = p["variants"][0]
-                    # Filtro de stock: Si shopify maneja stock, es 'deny' y qty <= 0 -> Ignorar
-                    if v1.get("inventory_management") == "shopify" and v1.get("inventory_policy") == "deny" and v1.get("inventory_quantity", 0) <= 0:
+                    # 1. Filtro de Canal de Ventas ("Tienda Online")
+                    if not p.get("published_at"):
                         continue
 
+                    # 2. Filtro de Stock Estricto
+                    v1 = p["variants"][0]
+                    qty = v1.get("inventory_quantity", 0)
+                    mgmt = v1.get("inventory_management")
+                    
+                    if mgmt == "shopify" and qty <= 0:
+                        continue
+                    
+                    # SI PASA FILTROS:
+                    todos_valid_ids.append(p["id"])
+
                     # Extraer data rica
+
                     p_id = p["id"]
                     title = p["title"]
                     price = float(v1["price"])
                     stock = v1.get("inventory_quantity", 0)
                     vendor = p.get("vendor", "")
                     category = p.get("product_type", "")
-                    tags = p.get("tags", "")
+                    
+                    # Procesar Tags (Excluir tag interno de sistema)
+                    raw_tags = p.get("tags", "") or ""
+                    tag_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+                    
+                    # Excluir etiqueta específica solicitada por usuario
+                    tags_filtrados = [
+                        t for t in tag_list 
+                        if t != "Smart Products Filter Index - Do not delete"
+                    ]
+                    
+                    tags = ", ".join(tags_filtrados)
+                    
                     body = p.get("body_html", "") or ""
                     handle = p.get("handle", "")
                     
@@ -213,6 +239,18 @@ class GlamStoreDB:
                     pagina += 1
                 else:
                     url = None
+            
+            # --- LIMPIEZA DE PRODUCTOS ANTIGUOS ---
+            if todos_valid_ids:
+                placeholders = ','.join(['?'] * len(todos_valid_ids))
+                sql_cleanup = f"DELETE FROM productos WHERE id NOT IN ({placeholders})"
+                cursor.execute(sql_cleanup, todos_valid_ids)
+                deleted_count = cursor.rowcount
+                conn.commit()
+                logging.info(f"🧹 Limpieza SQL: {deleted_count} productos eliminados (no estaban en Shopify o sin stock).")
+            else:
+                logging.warning("⚠️ Sync devolvió 0 productos válidos. No se borró nada por seguridad.")
+
             
             # Al finalizar, recargar memoria
             conn.close()
