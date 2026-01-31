@@ -185,7 +185,7 @@ class GlamStoreDB:
                               id
                               price
                               inventoryQuantity
-                              inventoryManagement
+                              inventoryPolicy
                             }}
                           }}
                         }}
@@ -218,10 +218,12 @@ class GlamStoreDB:
                     if not variants_edges: continue
                     v1_node = variants_edges[0]["node"]
                     
-                    # 1. Filtro Stock (Redundante con Query pero seguro)
+                    # 1. Filtro Stock
                     qty = v1_node.get("inventoryQuantity", 0)
-                    mgmt = v1_node.get("inventoryManagement")
-                    if mgmt == "shopify" and qty <= 0:
+                    policy = v1_node.get("inventoryPolicy", "deny")
+                    
+                    # Si la política es 'deny' (no vender sin stock) y cantidad <= 0, saltar
+                    if policy == "deny" and qty <= 0:
                         continue
 
                     # ID: "gid://shopify/Product/123456" -> 123456
