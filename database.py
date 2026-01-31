@@ -167,9 +167,8 @@ class GlamStoreDB:
                     logging.error(f"❌ Shopify Error: {r.status_code}")
                     break
                 
-                # Track valid IDs
-                valid_ids = []
-
+                items = r.json().get("products", [])
+                
                 for p in items:
                     if not p.get("variants"): continue
                     
