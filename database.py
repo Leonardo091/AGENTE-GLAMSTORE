@@ -147,77 +147,132 @@ class GlamStoreDB:
     def _actualizar_tabla_maestra(self):
         self.sync_status = "Sincronizando..."
         clean_url = self.shopify_url.replace("https://", "").replace("/", "")
-        url = f"https://{clean_url}/admin/api/2024-10/products.json"
+        graphql_url = f"https://{clean_url}/admin/api/2024-10/graphql.json"
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
-        params = {"status": "active", "limit": 250}
         
-        nuevos_datos = []
-        logging.info("🔄 SQL Sync: Conectando a Shopify...")
-
+        logging.info("🔄 SQL Sync: Conectando a Shopify (GraphQL)...")
+        
         conn = self._get_conn()
         cursor = conn.cursor()
         
         try:
-            pagina = 1
-            todos_valid_ids = []  # Acumulador de IDs válidos de TODAS las páginas
+            todos_valid_ids = []
+            has_next_page = True
+            end_cursor = None
             
-            while url:
-                r = requests.get(url, headers=headers, params=params, timeout=20)
+            while has_next_page:
+                # Construir Query con paginación
+                cursor_param = f'"{end_cursor}"' if end_cursor else "null"
+                query = f"""
+                {{
+                  products(first: 50, after: {cursor_param}, query: "status:active inventory_total:>0 published_status:published") {{
+                    pageInfo {{ hasNextPage endCursor }}
+                    edges {{
+                      node {{
+                        id
+                        title
+                        descriptionHtml
+                        vendor
+                        productType
+                        handle
+                        tags
+                        publishedAt
+                        category {{ name }}
+                        collections(first: 10) {{ edges {{ node {{ title }} }} }}
+                        variants(first: 1) {{
+                          edges {{
+                            node {{
+                              id
+                              price
+                              inventoryQuantity
+                              inventoryManagement
+                            }}
+                          }}
+                        }}
+                        images(first: 5) {{ edges {{ node {{ url }} }} }}
+                      }}
+                    }}
+                  }}
+                }}
+                """
+                
+                r = requests.post(graphql_url, headers=headers, json={"query": query}, timeout=30)
+                
                 if r.status_code != 200:
-                    logging.error(f"❌ Shopify Error: {r.status_code}")
+                    logging.error(f"❌ Shopify GraphQL Error: {r.status_code} {r.text}")
                     break
                 
-                items = r.json().get("products", [])
+                data = r.json()
+                if "errors" in data:
+                    logging.error(f"❌ GraphQL Query Errors: {data['errors']}")
+                    break
+                    
+                products_data = data.get("data", {}).get("products", {})
+                edges = products_data.get("edges", [])
                 
-                for p in items:
-                    if not p.get("variants"): continue
+                for edge in edges:
+                    node = edge["node"]
                     
-                    # 1. Filtro de Canal de Ventas ("Tienda Online")
-                    if not p.get("published_at"):
-                        continue
-
-                    # 2. Filtro de Stock Estricto
-                    v1 = p["variants"][0]
-                    qty = v1.get("inventory_quantity", 0)
-                    mgmt = v1.get("inventory_management")
+                    # Validación básica de variantes
+                    variants_edges = node.get("variants", {}).get("edges", [])
+                    if not variants_edges: continue
+                    v1_node = variants_edges[0]["node"]
                     
+                    # 1. Filtro Stock (Redundante con Query pero seguro)
+                    qty = v1_node.get("inventoryQuantity", 0)
+                    mgmt = v1_node.get("inventoryManagement")
                     if mgmt == "shopify" and qty <= 0:
                         continue
-                    
-                    # SI PASA FILTROS:
-                    todos_valid_ids.append(p["id"])
+
+                    # ID: "gid://shopify/Product/123456" -> 123456
+                    try:
+                        p_id = int(node["id"].split("/")[-1])
+                    except:
+                        continue
+                        
+                    todos_valid_ids.append(p_id)
 
                     # Extraer data rica
-
-                    p_id = p["id"]
-                    title = p["title"]
-                    price = float(v1["price"])
-                    stock = v1.get("inventory_quantity", 0)
-                    vendor = p.get("vendor", "")
-                    category = p.get("product_type", "")
+                    title = node.get("title", "")
+                    price = float(v1_node.get("price", 0))
+                    stock = qty
+                    vendor = node.get("vendor", "")
                     
-                    # Procesar Tags (Excluir tag interno de sistema)
-                    raw_tags = p.get("tags", "") or ""
-                    tag_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+                    # CATEGORÍA: Prioridad Taxonomy > Product Type
+                    cat_tax = node.get("category", {})
+                    category = cat_tax.get("name") if cat_tax else node.get("productType", "")
                     
-                    # Excluir etiqueta específica solicitada por usuario
+                    # TAGS: Mezclar tags + colecciones
+                    raw_tags = node.get("tags", []) # Lista en GraphQL
+                    
+                    # Incluir colecciones como tags (hack útil)
+                    col_edges = node.get("collections", {}).get("edges", [])
+                    col_titles = [c["node"]["title"] for c in col_edges]
+                    
+                    all_tags_set = set(raw_tags + col_titles)
+                    
+                    # Excluir etiqueta prohibida
                     tags_filtrados = [
-                        t for t in tag_list 
-                        if t != "Smart Products Filter Index - Do not delete"
+                        t.strip() for t in all_tags_set 
+                        if t.strip() != "Smart Products Filter Index - Do not delete"
                     ]
+                    tags_str = ", ".join(tags_filtrados)
                     
-                    tags = ", ".join(tags_filtrados)
-                    
-                    body = p.get("body_html", "") or ""
-                    handle = p.get("handle", "")
+                    body = node.get("descriptionHtml", "") or ""
+                    handle = node.get("handle", "")
                     
                     # Imágenes
-                    imgs = [i["src"] for i in p.get("images", [])]
+                    img_edges = node.get("images", {}).get("edges", [])
+                    imgs = [i["node"]["url"] for i in img_edges]
                     imgs_json = json.dumps(imgs)
 
                     # Texto búsqueda
-                    texto_sucio = f"{title} {vendor} {category} {tags}"
+                    texto_sucio = f"{title} {vendor} {category} {tags_str}"
                     texto_limpio = self._normalizar(texto_sucio)
+                    
+                    # Variant ID
+                    v_id_raw = v1_node["id"]
+                    v_id = int(v_id_raw.split("/")[-1]) if "gid://" in v_id_raw else v_id_raw
 
                     # UPSERT en SQL
                     cursor.execute('''
@@ -225,19 +280,17 @@ class GlamStoreDB:
                         (id, title, price, stock, vendor, category, tags, body_html, handle, images_json, search_text, variant_id, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        p_id, title, price, stock, vendor, category, tags, body, handle, imgs_json, 
-                        texto_limpio, v1["id"], datetime.now()
+                        p_id, title, price, stock, vendor, category, tags_str, body, handle, imgs_json, 
+                        texto_limpio, v_id, datetime.now()
                     ))
                 
                 conn.commit()
                 
-                 # Paginación
-                if 'next' in r.links:
-                    url = r.links['next']['url']
-                    params = {}
-                    pagina += 1
-                else:
-                    url = None
+                # Paginación
+                page_info = products_data.get("pageInfo", {})
+                has_next_page = page_info.get("hasNextPage", False)
+                end_cursor = page_info.get("endCursor")
+
             
             # --- LIMPIEZA DE PRODUCTOS ANTIGUOS ---
             if todos_valid_ids:
@@ -246,7 +299,7 @@ class GlamStoreDB:
                 cursor.execute(sql_cleanup, todos_valid_ids)
                 deleted_count = cursor.rowcount
                 conn.commit()
-                logging.info(f"🧹 Limpieza SQL: {deleted_count} productos eliminados (no estaban en Shopify o sin stock).")
+                logging.info(f"🧹 Limpieza SQL: {deleted_count} productos eliminados.")
             else:
                 logging.warning("⚠️ Sync devolvió 0 productos válidos. No se borró nada por seguridad.")
 
@@ -256,12 +309,12 @@ class GlamStoreDB:
             self._cargar_memoria_desde_sql()
             self.sync_status = "OK"
             self.sync_error = None
-            logging.info("✅ SQL Sync: Completada exitosamente.")
+            logging.info(f"✅ SQL GraphQL Sync: Completada. Total activos: {len(todos_valid_ids)}")
 
         except Exception as e:
             self.sync_status = "Error"
             self.sync_error = str(e)
-            logging.error(f"Error Sync Shopify->SQL: {e}")
+            logging.error(f"Error Sync GraphQL->SQL: {e}")
             if conn: conn.close()
 
     def _normalizar(self, texto):
