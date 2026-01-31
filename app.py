@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import logging
 import time
 import requests
@@ -6,6 +8,10 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from collections import deque
 from database import db 
 
@@ -104,6 +110,57 @@ def debug_search():
         "resultado": resultado
     }), 200
 
+@app.route("/admin/db")
+def admin_db_view():
+    """Vista HTML simple para ver la base de datos."""
+    # Seguridad básica: Solo local o si tiene clave (opcional)
+    # Por ahora abierta para facilidad de uso del usuario
+    
+    html = """
+    <html>
+    <head>
+        <title>GlamBot DB Admin</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body class="p-4">
+        <h2>📂 Base de Datos GlamBot</h2>
+        <p>Total Productos: <b>{{total}}</b> | Última Sync: <b>{{last_sync}}</b></p>
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr><th>ID</th><th>Título</th><th>Precio</th><th>Stock</th><th>Tags</th><th>Handle</th></tr>
+            </thead>
+            <tbody>
+    """
+    
+    # Inyectar filas
+    lista_prods = sorted(db.productos, key=lambda x: x['title'])
+    rows = ""
+    for p in lista_prods:
+        rows += f"""
+        <tr>
+            <td>{p['id']}</td>
+            <td>{p['title']}</td>
+            <td>${p['price']:,.0f}</td>
+            <td>{p.get('stock', '?')}</td>
+            <td><small>{p.get('tags', '')}</small></td>
+            <td><a href="https://glamstore.cl/products/{p.get('handle','')}" target="_blank">Link</a></td>
+        </tr>
+        """
+    
+    html += rows
+    html += """
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
+    
+    status = db.get_status()
+    html = html.replace("{{total}}", str(status['total_productos']))
+    html = html.replace("{{last_sync}}", str(status['ultima_sincronizacion']))
+    
+    return html
+
 # Endpoint de Verificación (Requerido por Meta)
 # Endpoint ÚNICO (Como estaba antes)
 @app.route("/webhook", methods=["GET", "POST"])
@@ -130,6 +187,50 @@ def webhook():
             texto = msg.get("text", {}).get("body", "")
             nombre = entry.get("contacts", [{}])[0].get("profile", {}).get("name", "Cliente")
             
+            # --- COMANDOS DE ADMINISTRADOR (!db) ---
+            # Solo permitidos para el número configurado en .env
+            admin_number = os.environ.get("ADMIN_NUMBER", "").replace("+", "").strip()
+            sender_norm = numero.replace("+", "").strip()
+            
+            if texto.startswith("!db") and admin_number and sender_norm == admin_number:
+                logging.info(f"🛡️ COMANDO ADMIN RECIBIDO de {nombre}: {texto}")
+                
+                try:
+                    if "status" in texto:
+                        st = db.get_status()
+                        resp = f"📊 *ESTADO DB*\nProductos: {st['total_productos']}\nÚltima Sync: {st['ultima_sincronizacion']}\nEstado: {st['estado_sincronizacion']}"
+                        enviar_whatsapp(numero, resp)
+                        
+                    elif "sync" in texto:
+                        enviar_whatsapp(numero, "⏳ Forzando sincronización... (Esto puede tomar unos segundos)")
+                        db.force_sync()
+                        # Esperar un poco para dar feedback (hacky pero útil)
+                        time.sleep(3)
+                        st = db.get_status()
+                        enviar_whatsapp(numero, f"✅ Sync iniciada/completada.\nEstado: {st['estado_sincronizacion']}\nTotal: {st['total_productos']}")
+                        
+                    elif "email" in texto:
+                        enviar_whatsapp(numero, "📧 Generando reporte CSV y enviando...")
+                        csv_data = db.exportar_csv_str()
+                        if enviar_reporte_email(csv_data):
+                            enviar_whatsapp(numero, "✅ Correo enviado exitosamente.")
+                        else:
+                            enviar_whatsapp(numero, "❌ Error enviando correo. Revisa logs.")
+                    
+                    elif "buscar" in texto:
+                        q = texto.replace("!db buscar", "").strip()
+                        res = db.buscar_contextual(q)
+                        txt = f"🔍 *Resultados Raw ({len(res['items'])}):*\n"
+                        for p in res['items']:
+                            txt += f"ID: {p['id']} | {p['title']} | Stock: {p.get('stock','?')} | Tags: {p.get('tags','')}\n\n"
+                        enviar_whatsapp(numero, txt[:1000]) # Limitar largo
+
+                    return jsonify({"status": "command_executed"}), 200
+                except Exception as e:
+                    logging.error(f"Error comando admin: {e}")
+                    enviar_whatsapp(numero, f"❌ Error ejecutando comando: {str(e)}")
+                    return jsonify({"status": "error"}), 200
+
             # Contexto (Reply)
             msg_context_id = msg.get("context", {}).get("id")
 
@@ -145,21 +246,15 @@ def webhook():
             historial_txt = "\n".join([f"User: {h['txt']}\nBot: {h['resp']}" for h in usuario['historial']])
 
             if model:
-                # --- AUTO-SYNC: GARANTIZAR DATOS FRESCOS ---
-                # Si el cerebro está vacío O la información es muy vieja (>20min), recargamos
-                necesita_recarga = False
-                msg_reason = ""
+                # --- AUTO-SYNC: GARANTIZAR DATOS FRESCOS (Background) ---
+                # Si los datos tienen más de 30 min de antigüedad, disparamos sync en hilo aparte
+                # para no bloquear la respuesta al usuario.
+                db.trigger_sync_if_stale(minutes=30)
                 
+                # Si el cerebro está literalmente vacío (reinicio fallido), ahí sí bloqueamos
                 if db.total_items == 0:
-                    necesita_recarga = True
-                    msg_reason = "Cerebro vacío"
-                elif db.last_sync and (datetime.now() - db.last_sync) > timedelta(minutes=20):
-                    necesita_recarga = True
-                    msg_reason = "Datos antiguos"
-                
-                if necesita_recarga:
-                    logging.info(f"🧠 {msg_reason} al recibir mensaje. Ejecutando sincronización síncrona...")
-                    db._actualizar_tabla_maestra()
+                     logging.warning("🧠 Cerebro vacío. Forzando sync bloqueante...")
+                     db._actualizar_tabla_maestra()
 
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id)
             
@@ -267,10 +362,16 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
                      logging.info("📊 Aplicando clustering de precios (>4 items).")
                      mostrar_imagenes = False # NO enviar imágenes en fase de resumen
                 else:
-                    lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
+                    # Incluimos data rica en el contexto (Tags, Vendor)
+                    lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) [Stock:{p.get('stock','')}] {{Tags:{p.get('tags','')}}}" for p in res["items"]])
                     contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
             else: # EXACTO
-                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) (Handle: {p.get('handle','')})" for p in res["items"]])
+                # En exacto, damos la descripción recortada también
+                lista = ""
+                for p in res["items"]:
+                    desc_corta = p.get('body_html', '')[:150].replace("\n", " ") + "..."
+                    lista += f"- {p['title']} (${p['price']:,.0f})\n  📝 Desc: {desc_corta}\n  🏷️ Tags: {p.get('tags','')}\n"
+                
                 contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
             # Verificamos si quiere comprar explícitamente (SOLO INTENCION FIRME)
@@ -610,6 +711,42 @@ def enviar_imagen_whatsapp(numero, media_url, caption=""):
     except Exception as e:
         logging.error(f"Error env imagen: {e}")
         return None
+
+def enviar_reporte_email(csv_content):
+    """Envía el CSV por correo usando SMTP de Gmail."""
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASSWORD")
+    destinatario = smtp_user # Nos lo enviamos a nosotros mismos
+
+    if not smtp_user or not smtp_pass:
+        logging.error("❌ Faltan credenciales SMTP (SMTP_USER / SMTP_PASSWORD)")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = smtp_user
+        msg['To'] = destinatario
+        msg['Subject'] = f"📊 Reporte DB GlamBot - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        body = "Adjunto encontrarás el reporte completo de la base de datos de productos."
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Adjunto
+        part = MIMEApplication(csv_content.encode('utf-8'), Name="productos.csv")
+        part['Content-Disposition'] = 'attachment; filename="productos.csv"'
+        msg.attach(part)
+
+        # Enviar
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        
+        logging.info(f"📧 Email enviado a {destinatario}")
+        return True
+    except Exception as e:
+        logging.error(f"❌ Error enviando email: {e}")
+        return False
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
