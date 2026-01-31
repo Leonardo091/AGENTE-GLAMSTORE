@@ -127,7 +127,7 @@ def admin_db_view():
         <p>Total Productos: <b>{{total}}</b> | Última Sync: <b>{{last_sync}}</b></p>
         <table class="table table-striped table-hover">
             <thead class="table-dark">
-                <tr><th>ID</th><th>Título</th><th>Precio</th><th>Stock</th><th>Tags</th><th>Handle</th></tr>
+                <tr><th>ID</th><th>Título</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Tags</th><th>Handle</th></tr>
             </thead>
             <tbody>
     """
@@ -140,6 +140,7 @@ def admin_db_view():
         <tr>
             <td>{p['id']}</td>
             <td>{p['title']}</td>
+            <td><span class="badge bg-info text-dark">{p.get('category', '')}</span></td>
             <td>${p['price']:,.0f}</td>
             <td>{p.get('stock', '?')}</td>
             <td><small>{p.get('tags', '')}</small></td>
@@ -260,10 +261,18 @@ def webhook():
                 # para no bloquear la respuesta al usuario.
                 db.trigger_sync_if_stale(minutes=30)
                 
-                # Si el cerebro está literalmente vacío (reinicio fallido), ahí sí bloqueamos
+                # Si el cerebro está vacío, NO bloqueamos. Verificamos si ya está sincronizando.
                 if db.total_items == 0:
-                     logging.warning("🧠 Cerebro vacío. Forzando sync bloqueante...")
-                     db._actualizar_tabla_maestra()
+                    if db.sync_status != "Sincronizando...":
+                        logging.warning("🧠 Cerebro vacío. Iniciando sync en background...")
+                        db.force_sync()
+                    
+                    # Respondemos inmediatamente para no matar el webhook por timeout
+                    # El usuario recibirá respuesta cuando reintente o si el bot pudiera responder luego (complejo)
+                    # Por ahora, simplemente evitamos el crash.
+                    if intencion != "SOPORTE": # Si es soporte igual puede responder
+                         enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto y pregúntame de nuevo, por favor. 🙏")
+                         return jsonify({"status": "warming_up"}), 200
 
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id)
             
@@ -597,7 +606,7 @@ def procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuar
         - Si preguntan HORARIO/CUANDO:
            - Lun-Vie: 10:00 a 17:30 hrs
            - Sáb: 10:00 a 14:30 hrs
-        - Si preguntan MAYORISTA: Da el mensaje de contacto directo del sistema.
+        - Si preguntan MAYORISTA: Da el mensaje de contacto directo del sistema: "Hola, para compras mayoristas por favor escríbenos directo al +56972079712 para brindarte una atención más personalizada."
         - ENVÍOS: Solo "STARKEN (Por pagar)".
         
         {instruccion_saludo}
@@ -747,7 +756,9 @@ def enviar_reporte_email(csv_content):
         msg.attach(part)
 
         # Enviar
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # Cambiamos a puerto 587 (STARTTLS) que es más amigable con firewalls cloud
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
