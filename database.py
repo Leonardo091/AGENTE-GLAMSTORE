@@ -50,6 +50,10 @@ class GlamStoreDB:
             self.sync_status = "Error: Faltan Credenciales"
             logging.warning("⚠️ MODO SIN CONEXIÓN: Faltan credenciales de Shopify")
 
+    @property
+    def total_items(self):
+        return len(self.productos)
+
     def _get_conn(self):
         return sqlite3.connect(self.db_path, check_same_thread=False)
 
