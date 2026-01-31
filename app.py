@@ -263,15 +263,17 @@ def webhook():
                 
                 # Si el cerebro está vacío, NO bloqueamos. Verificamos si ya está sincronizando.
                 if db.total_items == 0:
-                    if db.sync_status != "Sincronizando...":
-                        logging.warning("🧠 Cerebro vacío. Iniciando sync en background...")
-                        db.force_sync()
+                    logging.warning(f"⚠️ Cerebro vacío (items=0). Status: {db.sync_status}. Intentando recarga rápida SQL...")
+                    db._cargar_memoria_desde_sql()
                     
-                    # Respondemos inmediatamente para no matar el webhook por timeout
-                    # El usuario recibirá respuesta cuando reintente o si el bot pudiera responder luego (complejo)
-                    # Por ahora, simplemente evitamos el crash.
-                    enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto y pregúntame de nuevo, por favor. 🙏")
-                    return jsonify({"status": "warming_up"}), 200
+                    # Si sigue vacío después de recargar, entonces sí respondemos warming up
+                    if db.total_items == 0:
+                        if db.sync_status != "Sincronizando...":
+                            logging.warning("🧠 Cerebro sigue vacío tras reload. Forzando sync en background...")
+                            db.force_sync()
+                        
+                        enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto y pregúntame de nuevo, por favor. 🙏")
+                        return jsonify({"status": "warming_up"}), 200
 
                 procesar_inteligencia_artificial(numero, nombre, texto, historial_txt, usuario, msg_context_id)
             
