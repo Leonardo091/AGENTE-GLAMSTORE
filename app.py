@@ -143,7 +143,7 @@ def admin_db_view():
             <td>${p['price']:,.0f}</td>
             <td>{p.get('stock', '?')}</td>
             <td><small>{p.get('tags', '')}</small></td>
-            <td><a href="https://glamstore.cl/products/{p.get('handle','')}" target="_blank">Link</a></td>
+            <td><a href="https://glamstorechile.cl/products/{p.get('handle','')}" target="_blank">Link</a></td>
         </tr>
         """
     
