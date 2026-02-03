@@ -1,0 +1,38 @@
+C:\Users\leona\Desktop\ANTIGRAVITY\AGENTE DE TESTEOS\sandbox\app.py:9: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+2026-02-02 20:22:25,862 - INFO - \u26a1 BOOT: 0 productos cargados desde SQL.
+2026-02-02 20:22:25,862 - WARNING - \u26a0\ufe0f MODO SIN CONEXIÓN: Faltan credenciales de Shopify
+2026-02-02 20:22:25,863 - WARNING - \u26a0\ufe0f SANDBOX: Usando MockModel
+ * Serving Flask app 'app'
+ * Debug mode: off
+2026-02-02 20:22:25,873 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:10000
+ * Running on http://192.168.0.7:10000
+2026-02-02 20:22:25,873 - INFO - [33mPress CTRL+C to quit[0m
+2026-02-02 20:22:26,205 - INFO - \U0001f4e8 WEBHOOK RECIBIDO: {'object': 'whatsapp_business_account', 'entry': [{'id': '123456789', 'changes': [{'value': {'messaging_product': 'whatsapp', 'metadata': {'display_phone_number': '123', 'phone_number_id': '987'}, 'contacts': [{'profile': {'name': 'TestUser'}, 'wa_id': '569999999'}], 'messages': [{'from': '569999999', 'id': 'wamid.test.0', 'timestamp': '1770074545', 'text': {'body': 'Hola, ¿qué horario tienen?'}, 'type': 'text'}]}, 'field': 'messages'}]}]}
+2026-02-02 20:22:26,205 - INFO - \u2139\ufe0f Detectada pregunta de soporte/info. Omitiendo búsqueda de productos y forzando SOPORTE.
+2026-02-02 20:22:26,205 - ERROR - Error clasificando intención: cannot access local variable 'prompt_router' where it is not associated with a value
+2026-02-02 20:22:26,205 - INFO - \U0001f9e0 Intención Final: CHARLA
+>>> BOT REPLIED: Nuestro horario es Lunes a Viernes 10:00-17:30.
+2026-02-02 20:22:26,205 - WARNING - \u26a0\ufe0f No se envió mensaje porque no hay WHATSAPP_TOKEN
+2026-02-02 20:22:26,205 - INFO - 127.0.0.1 - - [02/Feb/2026 20:22:26] "POST /webhook HTTP/1.1" 200 -
+2026-02-02 20:22:27,222 - INFO - \U0001f4e8 WEBHOOK RECIBIDO: {'object': 'whatsapp_business_account', 'entry': [{'id': '123456789', 'changes': [{'value': {'messaging_product': 'whatsapp', 'metadata': {'display_phone_number': '123', 'phone_number_id': '987'}, 'contacts': [{'profile': {'name': 'TestUser'}, 'wa_id': '569999999'}], 'messages': [{'from': '569999999', 'id': 'wamid.test.1', 'timestamp': '1770074547', 'text': {'body': 'Quiero saber el precio de un perfume'}, 'type': 'text'}]}, 'field': 'messages'}]}]}
+2026-02-02 20:22:27,222 - INFO - \U0001f50e Buscando productos para: 'Quiero saber el precio de un perfume'...
+2026-02-02 20:22:27,222 - INFO - \U0001f9e0 Intención Final: SOPORTE
+>>> BOT REPLIED: Tenemos precio oferta $10.000 para ese perfume. ?Te lo envuelvo? ?
+2026-02-02 20:22:27,222 - WARNING - \u26a0\ufe0f No se envió mensaje porque no hay WHATSAPP_TOKEN
+2026-02-02 20:22:27,223 - INFO - 127.0.0.1 - - [02/Feb/2026 20:22:27] "POST /webhook HTTP/1.1" 200 -
+2026-02-02 20:22:28,239 - INFO - \U0001f4e8 WEBHOOK RECIBIDO: {'object': 'whatsapp_business_account', 'entry': [{'id': '123456789', 'changes': [{'value': {'messaging_product': 'whatsapp', 'metadata': {'display_phone_number': '123', 'phone_number_id': '987'}, 'contacts': [{'profile': {'name': 'TestUser'}, 'wa_id': '569999999'}], 'messages': [{'from': '569999999', 'id': 'wamid.test.2', 'timestamp': '1770074548', 'text': {'body': 'Sí, dame el link de pago por favor'}, 'type': 'text'}]}, 'field': 'messages'}]}]}
+2026-02-02 20:22:28,240 - INFO - \U0001f50e Buscando productos para: 'Sí, dame el link de pago por favor'...
+2026-02-02 20:22:28,240 - INFO - \U0001f9e0 Intención Final: SOPORTE
+>>> BOT REPLIED: ?Claro! Aqu? tienes tu link de pago seguro: https://sandbox-check.out/pay ?
+2026-02-02 20:22:28,240 - WARNING - \u26a0\ufe0f No se envió mensaje porque no hay WHATSAPP_TOKEN
+2026-02-02 20:22:28,241 - INFO - 127.0.0.1 - - [02/Feb/2026 20:22:28] "POST /webhook HTTP/1.1" 200 -
