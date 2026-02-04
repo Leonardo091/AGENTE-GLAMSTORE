@@ -370,7 +370,7 @@ class GlamStoreDB:
             "Maquillaje": ["maquillaje", "labial", "sombra", "rimel", "mascara", "delineador", "base", "polvo", "rubor", "corrector", "primer", "fijador"],
             "Skin Care": ["skin care", "skincare", "piel", "crema", "facial", "serum", "rostro", "mascarilla", "hidratante", "limpieza", "tonico"],
             "Productos Capilares": ["capilar", "cabello", "pelo", "shampoo", "acondicionador", "mascara", "tratamiento", "oleo", "peine", "cepillo"],
-            "Perfumes": ["perfume", "fragancia", "colonia", "aroma", "body splash", "spray", "locion"],
+            "Perfumes": ["perfume", "fragancia", "colonia", "aroma", "body splash", "spray", "locion", "floral", "dulce", "citrico", "frutal", "amaderado", "oriental"],
             "Accesorios": ["accesorio", "bolso", "cosmetiquero", "espejo", "brocha", "esponja", "pinza", "elastico", "colet"]
         }
         
