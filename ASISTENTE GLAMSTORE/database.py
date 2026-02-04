@@ -62,6 +62,9 @@ class GlamStoreDB:
 
     @property
     def total_items(self) -> int:
+        # Auto-heal: Si un worker tiene memoria vacía pero la DB tiene datos
+        if not self.productos:
+            self._cargar_memoria_desde_sql()
         return len(self.productos)
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -448,6 +451,12 @@ class GlamStoreDB:
                  return {"tipo": "EXACTO", "items": random.sample(candidatos_precio, min(5, len(candidatos_precio)))}
 
         return {"tipo": "VACIO", "items": []}
+    
+    def get_random_products(self, n: int = 1) -> List[Dict[str, Any]]:
+        """Devuelve N productos aleatorios de la DB en memoria."""
+        if not self.productos: return []
+        import random
+        return random.sample(self.productos, min(n, len(self.productos)))
 
     # --- EXPORTACIÓN ---
     def exportar_csv_str(self) -> str:

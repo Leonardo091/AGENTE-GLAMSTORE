@@ -207,7 +207,16 @@ def procesar_inteligencia_artificial(
          
          # Busqueda
          logging.info(f"🔎 Buscando productos para: '{texto}'...")
-         res = db.buscar_contextual(texto)
+         
+         # LOGICA RANDOM / SORPRENDEME
+         keywords_random = ["aleatorio", "random", "sorprendeme", "azar", "suerte"]
+         if any(k in texto.lower() for k in keywords_random):
+             items_random = db.get_random_products(3)
+             res = {"tipo": "RECOMENDACION_REAL", "items": items_random}
+             logging.info(f"🎲 Random items selected: {len(items_random)}")
+         else:
+             res = db.buscar_contextual(texto)
+         
          # Omitimos logica 'sinonimos' detallada para no duplicar demasiado código, pero base busca bien.
 
     # Producto Foco override
