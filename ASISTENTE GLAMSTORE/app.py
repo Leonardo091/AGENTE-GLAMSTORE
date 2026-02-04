@@ -49,6 +49,40 @@ def debug_search():
     resultado = db.buscar_contextual(query)
     return jsonify({"q": query, "res": resultado}), 200
 
+@app.route("/admin/db")
+def admin_db():
+    try:
+        status = db.get_status()
+        products = db.productos[:50] # Show top 50
+        html = f"""
+        <html>
+        <head><title>Admin DB View</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h1>🛠️ Estadísticas de Base de Datos</h1>
+            <ul>
+                <li><strong>Total Productos:</strong> {status.get('total_productos', 0)}</li>
+                <li><strong>Ultima Sincronización:</strong> {status.get('last_sync', 'Nunca')}</li>
+                <li><strong>Estado Sync:</strong> {status.get('sync_status', 'Desconocido')}</li>
+                <li><strong>Modo Vacaciones:</strong> {status.get('modo_vacaciones', False)}</li>
+            </ul>
+            <hr>
+            <h2>📦 Muestra de Productos (Top 50)</h2>
+            <table border="1" style="border-collapse: collapse; width: 100%;">
+                <tr style="background-color: #f2f2f2;">
+                    <th style="padding: 8px;">ID</th>
+                    <th style="padding: 8px;">Título</th>
+                    <th style="padding: 8px;">Precio</th>
+                    <th style="padding: 8px;">Stock</th>
+                </tr>
+                {''.join([f"<tr><td style='padding:8px;'>{p.get('id')}</td><td style='padding:8px;'>{p.get('title')}</td><td style='padding:8px;'>${int(float(p.get('price',0))):,}</td><td style='padding:8px;'>{p.get('stock')}</td></tr>" for p in products])}
+            </table>
+        </body>
+        </html>
+        """
+        return html
+    except Exception as e:
+        return f"Error leyendo DB: {str(e)}", 500
+
 # --- WEBHOOK PRINCIPAL ---
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():

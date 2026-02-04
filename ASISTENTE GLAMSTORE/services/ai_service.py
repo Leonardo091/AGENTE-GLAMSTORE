@@ -189,11 +189,12 @@ def procesar_inteligencia_artificial(
     else:
          # LOGICA PRODUCTO
          if db.total_items == 0:
-             if MODO_VACACIONES:
+            if MODO_VACACIONES:
                  enviar_whatsapp(numero, "🌴 ¡Hola! Estamos de vacaciones hasta Marzo.\nEstamos activando el *Modo Revista*... Dame 2 minutos. ⏳")
-             else:
+            else:
                  enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto. 🙏")
-             return
+            # NO RETURN HERE! We want to proceed to search.
+            # return
 
          # Expansion Semantica
          diccionario_sinonimos = {
