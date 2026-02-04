@@ -180,7 +180,9 @@ class GlamStoreDB:
                  filtro_query = 'query: "status:active OR status:draft OR status:archived"' 
                  logging.warning("🌴 MODO VACACIONES: Sync ampliado (Active + Draft + Archived).")
             else:
-                 filtro_query = 'query: "status:active inventory_total:>0 published_status:published"'
+                 # Simplificamos el filtro para asegurar que lleguen datos.
+                 # El filtro anterior 'inventory_total:>0' o 'published_status' podria estar fallando.
+                 filtro_query = 'query: "status:active"'
 
             while has_next_page:
                 # Construir Query con paginación
