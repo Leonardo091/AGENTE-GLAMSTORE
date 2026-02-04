@@ -83,6 +83,43 @@ def admin_db():
     except Exception as e:
         return f"Error leyendo DB: {str(e)}", 500
 
+@app.route("/debug/shopify")
+def debug_shopify():
+    try:
+        if not db.shopify_token or not db.shopify_url:
+            return jsonify({"error": "Missing Credentials"}), 500
+            
+        headers = {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": db.shopify_token
+        }
+        
+        # Simple query to test connection and count
+        query = """
+        {
+          products(first: 5) {
+            edges {
+              node {
+                id
+                title
+                status
+              }
+            }
+          }
+        }
+        """
+        
+        response = requests.post(f"https://{db.shopify_url}/admin/api/2023-01/graphql.json", json={"query": query}, headers=headers)
+        
+        return jsonify({
+            "status_code": response.status_code,
+            "url": f"https://{db.shopify_url}/admin/api/2023-01/graphql.json",
+            "response_headers": dict(response.headers),
+            "response_body": response.json() if response.status_code == 200 else response.text
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- WEBHOOK PRINCIPAL ---
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
