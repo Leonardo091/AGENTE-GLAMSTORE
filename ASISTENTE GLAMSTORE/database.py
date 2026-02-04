@@ -176,13 +176,13 @@ class GlamStoreDB:
             # --- MODO VACACIONES / REVISTA ---
             # Si está activo, traemos TODO (sin stock, ocultos, borrador, archivado)
             if getattr(self, "modo_vacaciones", False):
-                 # Query amplia: Activos, Borradores y Archivados
-                 filtro_query = 'query: "status:active OR status:draft OR status:archived"' 
-                 logging.warning("🌴 MODO VACACIONES: Sync ampliado (Active + Draft + Archived).")
+                 # MODO REVISTA: Mostramos todo lo activo, sin importar stock.
+                 # (Quitamos 'draft' y 'archived' por ahora para asegurar compatibilidad, 'active' es suficiente para catalogo)
+                 filtro_query = 'query: "status:active"' 
+                 logging.warning("🌴 MODO VACACIONES: Sync ampliado (Todo lo Active).")
             else:
-                 # Simplificamos el filtro para asegurar que lleguen datos.
-                 # El filtro anterior 'inventory_total:>0' o 'published_status' podria estar fallando.
-                 filtro_query = 'query: "status:active"'
+                 # MODO NORMAL: Solo lo vendible (Activo + Con Stock)
+                 filtro_query = 'query: "status:active inventory_total:>0"'
 
             while has_next_page:
                 # Construir Query con paginación
