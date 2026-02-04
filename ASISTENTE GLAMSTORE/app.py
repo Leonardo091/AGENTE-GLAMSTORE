@@ -61,9 +61,9 @@ def admin_db():
             <h1>🛠️ Estadísticas de Base de Datos</h1>
             <ul>
                 <li><strong>Total Productos:</strong> {status.get('total_productos', 0)}</li>
-                <li><strong>Ultima Sincronización:</strong> {status.get('last_sync', 'Nunca')}</li>
-                <li><strong>Estado Sync:</strong> {status.get('sync_status', 'Desconocido')}</li>
-                <li><strong>Modo Vacaciones:</strong> {status.get('modo_vacaciones', False)}</li>
+                <li><strong>Ultima Sincronización:</strong> {status.get('ultima_sincronizacion', 'Nunca')}</li>
+                <li><strong>Estado Sync:</strong> {status.get('estado_sincronizacion', 'Desconocido')}</li>
+                <li><strong>Modo Vacaciones:</strong> {db.modo_vacaciones}</li>
             </ul>
             <hr>
             <h2>📦 Muestra de Productos (Top 50)</h2>

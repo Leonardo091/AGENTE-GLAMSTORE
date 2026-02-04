@@ -174,22 +174,21 @@ class GlamStoreDB:
             end_cursor = None
             
             # --- MODO VACACIONES / REVISTA ---
-            # Si está activo, traemos TODO (sin stock, ocultos, borrador, archivado)
             if getattr(self, "modo_vacaciones", False):
-                 # MODO REVISTA: Mostramos todo lo activo, sin importar stock.
-                 # (Quitamos 'draft' y 'archived' por ahora para asegurar compatibilidad, 'active' es suficiente para catalogo)
-                 filtro_query = 'query: "status:active"' 
-                 logging.warning("🌴 MODO VACACIONES: Sync ampliado (Todo lo Active).")
+                 # MODO REVISTA: Sin filtros (Igual que la ruta debug que sí funcionó)
+                 filtro_param = "" 
+                 logging.warning("🌴 MODO VACACIONES: Sync GLOBAL (Sin filtros).")
             else:
-                 # MODO NORMAL: Solo lo vendible (Activo + Con Stock)
-                 filtro_query = 'query: "status:active inventory_total:>0"'
+                 # MODO NORMAL: Solo lo vendible
+                 filtro_param = ', query: "status:active inventory_total:>0"'
 
             while has_next_page:
                 # Construir Query con paginación
                 cursor_param = f'"{end_cursor}"' if end_cursor else "null"
+                # OJO: La coma ya va incluida en filtro_param si no está vacío
                 query = f"""
                 {{
-                  products(first: 50, after: {cursor_param}, {filtro_query}) {{
+                  products(first: 50, after: {cursor_param}{filtro_param}) {{
                     pageInfo {{ hasNextPage endCursor }}
                     edges {{
                       node {{
