@@ -31,7 +31,6 @@ class GlamStoreDB:
         self.shopify_url = os.environ.get("SHOPIFY_URL")
         
         # Palabras excluidas en búsquedas
-        # Palabras excluidas en búsquedas
         self.palabras_basura: Set[str] = {
             "hola", "buenos", "dias", "tardes", "busco", "venden", "tienen", 
             "quiero", "necesito", "comprar", "precio", "valor", "cuanto", 
@@ -41,6 +40,9 @@ class GlamStoreDB:
             "glamstore", "tienda", "gracias", "favor", "por",
             "el", "la", "los", "las", "un", "una", "de", "del", "que", "en", "y", "o"
         }
+
+        # CONFIGURACIÓN MODO VACACIONES (Hardcoded por seguridad)
+        self.modo_vacaciones = True
 
 
         # 1. INICIALIZAR SQLITE
@@ -174,21 +176,22 @@ class GlamStoreDB:
             end_cursor = None
             
             # --- MODO VACACIONES / REVISTA ---
+            # Si está activo, traemos TODO (sin stock, ocultos, borrador, archivado)
             if getattr(self, "modo_vacaciones", False):
-                 # MODO REVISTA: Sin filtros (Igual que la ruta debug que sí funcionó)
-                 filtro_param = "" 
-                 logging.warning("🌴 MODO VACACIONES: Sync GLOBAL (Sin filtros).")
+                 # MODO REVISTA: Mostramos todo lo activo, sin importar stock.
+                 # (Quitamos 'draft' y 'archived' por ahora para asegurar compatibilidad, 'active' es suficiente para catalogo)
+                 filtro_query = 'query: "status:active"' 
+                 logging.warning("🌴 MODO VACACIONES: Sync ampliado (Todo lo Active).")
             else:
-                 # MODO NORMAL: Solo lo vendible
-                 filtro_param = ', query: "status:active inventory_total:>0"'
+                 # MODO NORMAL: Solo lo vendible (Activo + Con Stock)
+                 filtro_query = 'query: "status:active inventory_total:>0"'
 
             while has_next_page:
                 # Construir Query con paginación
                 cursor_param = f'"{end_cursor}"' if end_cursor else "null"
-                # OJO: La coma ya va incluida en filtro_param si no está vacío
                 query = f"""
                 {{
-                  products(first: 50, after: {cursor_param}{filtro_param}) {{
+                  products(first: 50, after: {cursor_param}, {filtro_query}) {{
                     pageInfo {{ hasNextPage endCursor }}
                     edges {{
                       node {{
