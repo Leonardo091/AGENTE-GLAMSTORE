@@ -47,7 +47,8 @@ def check_rate_limit(numero: str) -> bool:
 def enviar_whatsapp(numero: str, texto: str, url_media: Optional[str] = None) -> bool:
     """Envía mensaje a WhatsApp Cloud API (Texto o Imagen)."""
     try:
-        url = "https://graph.facebook.com/v18.0/556730720850268/messages"
+        phone_id = os.environ.get("META_PHONE_ID")
+        url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {TOKEN_WHATSAPP}",
             "Content-Type": "application/json"
