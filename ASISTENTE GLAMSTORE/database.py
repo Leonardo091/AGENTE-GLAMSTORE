@@ -80,6 +80,7 @@ class GlamStoreDB:
                 id INTEGER PRIMARY KEY,
                 title TEXT,
                 price REAL,
+                compare_at_price REAL,
                 stock INTEGER,
                 vendor TEXT,
                 category TEXT,
@@ -92,6 +93,14 @@ class GlamStoreDB:
                 updated_at TIMESTAMP
             )
         ''')
+        
+        # Migración simple: Check if column exists
+        try:
+            cursor.execute("SELECT compare_at_price FROM productos LIMIT 1")
+        except sqlite3.OperationalError:
+            logging.info("🔧 Migración: Agregando columna 'compare_at_price'...")
+            cursor.execute("ALTER TABLE productos ADD COLUMN compare_at_price REAL")
+
         conn.commit()
         conn.close()
 
@@ -212,6 +221,7 @@ class GlamStoreDB:
                             node {{
                               id
                               price
+                              compareAtPrice
                               inventoryQuantity
                               inventoryPolicy
                             }}
@@ -266,6 +276,11 @@ class GlamStoreDB:
                     # Extraer data rica
                     title = node.get("title", "")
                     price = float(v1_node.get("price", 0))
+                    
+                    # CompareAtPrice (Precio Oferta)
+                    compare_at = v1_node.get("compareAtPrice")
+                    compare_at_price = float(compare_at) if compare_at else 0.0
+                    
                     stock = qty
                     vendor = node.get("vendor", "")
                     
@@ -280,9 +295,8 @@ class GlamStoreDB:
                     col_edges = node.get("collections", {}).get("edges", [])
                     col_titles = [c["node"]["title"] for c in col_edges]
                     
-                    all_tags_set = set(raw_tags + col_titles)
-                    
                     # Excluir etiqueta prohibida
+                    all_tags_set = set(raw_tags + col_titles)
                     tags_filtrados = [
                         t.strip() for t in all_tags_set 
                         if t.strip() != "Smart Products Filter Index - Do not delete"
@@ -308,10 +322,10 @@ class GlamStoreDB:
                     # UPSERT en SQL
                     cursor.execute('''
                         INSERT OR REPLACE INTO productos 
-                        (id, title, price, stock, vendor, category, tags, body_html, handle, images_json, search_text, variant_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, title, price, compare_at_price, stock, vendor, category, tags, body_html, handle, images_json, search_text, variant_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        p_id, title, price, stock, vendor, category, tags_str, body, handle, imgs_json, 
+                        p_id, title, price, compare_at_price, stock, vendor, category, tags_str, body, handle, imgs_json, 
                         texto_limpio, v_id, datetime.now()
                     ))
                 

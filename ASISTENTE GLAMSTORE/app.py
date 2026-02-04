@@ -71,10 +71,13 @@ def admin_db():
                 <tr style="background-color: #f2f2f2;">
                     <th style="padding: 8px;">ID</th>
                     <th style="padding: 8px;">Título</th>
+                    <th style="padding: 8px;">Categoría</th>
                     <th style="padding: 8px;">Precio</th>
+                    <th style="padding: 8px;">Oferta</th>
                     <th style="padding: 8px;">Stock</th>
+                    <th style="padding: 8px;">Tags</th>
                 </tr>
-                {''.join([f"<tr><td style='padding:8px;'>{p.get('id')}</td><td style='padding:8px;'>{p.get('title')}</td><td style='padding:8px;'>${int(float(p.get('price',0))):,}</td><td style='padding:8px;'>{p.get('stock')}</td></tr>" for p in products])}
+                {''.join([f"<tr><td style='padding:8px;'>{p.get('id')}</td><td style='padding:8px;'>{p.get('title')}</td><td style='padding:8px;'>{p.get('category','')}</td><td style='padding:8px;'>${int(float(p.get('price',0))):,}</td><td style='padding:8px; color:green;'>{f'${int(float(p.get('compare_at_price',0))):,}' if p.get('compare_at_price') else '-'}</td><td style='padding:8px;'>{p.get('stock')}</td><td style='padding:8px; font-size:10px;'>{p.get('tags','')}</td></tr>" for p in products])}
             </table>
         </body>
         </html>
