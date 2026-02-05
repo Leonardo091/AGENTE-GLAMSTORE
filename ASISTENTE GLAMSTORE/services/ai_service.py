@@ -270,12 +270,16 @@ def procesar_inteligencia_artificial(
     if not intencion: intencion = "CHARLA" # Default
     
     # Prompt Final
+    # Prompt Final
     target_prompt = f"""
     Eres 'GlamBot', asistente de Glamstore Chile.
     {contexto_data}
     Historial: {historial_txt}
     Usuario: {texto}
-    Responde amable, corto y con emojis. Intencion: {intencion}.
+    Responde amable, corto y con emojis. 
+    SI OFRECES PRODUCTOS: Usa formato "Catalog Style" (bullet points con emojis, sin repetir precios si ya salen en las fotos).
+    Evita las listas aburridas. ¡Vende la experiencia! ✨
+    Intencion: {intencion}.
     """
     
     if MODO_VACACIONES and intencion == "COMPRAR":
@@ -294,14 +298,18 @@ def procesar_inteligencia_artificial(
             # Solo enviar imagenes si NO estamos en vacaciones bloqueando... 
             # Ah no, Modo Revista SÍ muestra imagenes.
             img_count = 0
-            for p in res['items'][:3]: # Top 3
-                if img_count >= 3: break
+            for p in res['items'][:5]: # Top 5 (Antes 3)
+                if img_count >= 5: break
                 
                 # Fix: database.py returns 'images' as a flat List of strings
                 imgs = p.get("images", [])
                 if imgs and isinstance(imgs, list) and len(imgs) > 0:
                     url_img = imgs[0]
-                    enviar_whatsapp(numero, p['title'], url_img)
+                    # Caption con Precio
+                    precio_fmt = f"${int(p.get('price',0)):,}"
+                    caption = f"{p['title']}\n💰 {precio_fmt}"
+                    
+                    enviar_whatsapp(numero, caption, url_img)
                     img_count += 1
                     time.sleep(1) # Rate limit suave
     except Exception as e:
