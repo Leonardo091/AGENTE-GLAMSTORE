@@ -53,31 +53,45 @@ def debug_search():
 def admin_db():
     try:
         status = db.get_status()
-        products = db.productos[:50] # Show top 50
+        products = db.productos # Show ALL
         html = f"""
         <html>
-        <head><title>Admin DB View</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h1>🛠️ Estadísticas de Base de Datos</h1>
+        <head>
+            <title>Admin DB View</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 20px; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                th, td {{ padding: 8px; border: 1px solid #ddd; }}
+                th {{ background-color: #f2f2f2; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9; }}
+                .btn {{ 
+                    background-color: #4CAF50; color: white; padding: 10px 20px; 
+                    text-decoration: none; border-radius: 5px; font-weight: bold;
+                }}
+            </style>
+        </head>
+        <body>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h1>🛠️ Base de Datos ({len(products)} productos)</h1>
+                <a href="/admin/force_sync" class="btn">🔄 Forzar Sincronización</a>
+            </div>
             <ul>
-                <li><strong>Total Productos:</strong> {status.get('total_productos', 0)}</li>
                 <li><strong>Ultima Sincronización:</strong> {status.get('last_sync', 'Nunca')}</li>
                 <li><strong>Estado Sync:</strong> {status.get('sync_status', 'Desconocido')}</li>
                 <li><strong>Modo Vacaciones:</strong> {status.get('modo_vacaciones', False)}</li>
             </ul>
             <hr>
-            <h2>📦 Muestra de Productos (Top 50)</h2>
-            <table border="1" style="border-collapse: collapse; width: 100%;">
-                <tr style="background-color: #f2f2f2;">
-                    <th style="padding: 8px;">ID</th>
-                    <th style="padding: 8px;">Título</th>
-                    <th style="padding: 8px;">Categoría</th>
-                    <th style="padding: 8px;">Precio</th>
-                    <th style="padding: 8px;">Oferta</th>
-                    <th style="padding: 8px;">Stock</th>
-                    <th style="padding: 8px;">Tags</th>
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Título</th>
+                    <th>Categoría</th>
+                    <th>Precio</th>
+                    <th>Oferta</th>
+                    <th>Stock</th>
+                    <th>Tags</th>
                 </tr>
-                {''.join([f"<tr><td style='padding:8px;'>{p.get('id')}</td><td style='padding:8px;'>{p.get('title')}</td><td style='padding:8px;'>{p.get('category','')}</td><td style='padding:8px;'>${int(float(p.get('price',0))):,}</td><td style='padding:8px; color:green;'>{f'${int(float(p.get('compare_at_price',0))):,}' if p.get('compare_at_price') else '-'}</td><td style='padding:8px;'>{p.get('stock')}</td><td style='padding:8px; font-size:10px;'>{p.get('tags','')}</td></tr>" for p in products])}
+                {''.join([f"<tr><td>{p.get('id')}</td><td>{p.get('title')}</td><td>{p.get('category','')}</td><td>${int(float(p.get('price',0))):,}</td><td style='color:green;'>{f'${int(float(p.get('compare_at_price',0))):,}' if p.get('compare_at_price') else '-'}</td><td>{p.get('stock')}</td><td style='font-size:10px;'>{p.get('tags','')}</td></tr>" for p in products])}
             </table>
         </body>
         </html>
@@ -85,6 +99,12 @@ def admin_db():
         return html
     except Exception as e:
         return f"Error leyendo DB: {str(e)}", 500
+
+@app.route("/admin/force_sync")
+def admin_force_sync():
+    import threading
+    threading.Thread(target=db._actualizar_tabla_maestra).start()
+    return "Sincronización iniciada en segundo plano. <a href='/admin/db'>Volver</a>"
 
 @app.route("/debug/shopify")
 def debug_shopify():
