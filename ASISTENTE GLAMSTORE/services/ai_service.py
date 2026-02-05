@@ -296,9 +296,11 @@ def procesar_inteligencia_artificial(
             img_count = 0
             for p in res['items'][:3]: # Top 3
                 if img_count >= 3: break
-                imgs = p.get("images", {}).get("edges", [])
-                if imgs:
-                    url_img = imgs[0]["node"]["url"]
+                
+                # Fix: database.py returns 'images' as a flat List of strings
+                imgs = p.get("images", [])
+                if imgs and isinstance(imgs, list) and len(imgs) > 0:
+                    url_img = imgs[0]
                     enviar_whatsapp(numero, p['title'], url_img)
                     img_count += 1
                     time.sleep(1) # Rate limit suave
