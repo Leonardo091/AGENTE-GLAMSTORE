@@ -97,15 +97,23 @@ def debug_shopify():
             "X-Shopify-Access-Token": db.shopify_token
         }
         
-        # Simple query to test connection and count
+        # Query Completa de Prueba
         query = """
         {
-          products(first: 5) {
+          products(first: 3) {
             edges {
               node {
                 id
                 title
-                status
+                category { name }
+                variants(first: 1) {
+                  edges {
+                    node {
+                      price
+                      compareAtPrice
+                    }
+                  }
+                }
               }
             }
           }
