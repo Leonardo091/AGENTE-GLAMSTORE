@@ -303,7 +303,7 @@ def procesar_inteligencia_artificial(
     Recuerda: Queremos que el cliente se lleve lo que DE VERDAD necesita. ¡Asesóralo con honestidad!
     """
     
-    if MODO_VACACIONES and intencion == "COMPRAR":
+    if db.modo_vacaciones and intencion == "COMPRAR":
         target_prompt += "\nRECORDATORIO CRITICO: NO GENERES LINK DE PAGO. Di que estamos de vacaciones."
 
     try:
