@@ -21,8 +21,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 
 # --- CONFIGURACION GLOBAL ---
-MODO_VACACIONES = True
-db.modo_vacaciones = MODO_VACACIONES
+# MODO_VACACIONES controlado por DB
+# db.modo_vacaciones = True (Seteado en Database __init__)
 VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "glamstore_verify_token")
 
 # --- MEMORIA ESTADO ---
@@ -266,6 +266,10 @@ def webhook():
    (Si no pones correo, usa el por defecto).
 3. *!comandos*
    📜 Muestra esta lista.
+4. *!modo ventas*
+   🟢 Activa ventas y links de pago.
+5. *!modo vacaciones*
+   🔴 Cierra ventas (Solo catálogo).
 """
                      enviar_whatsapp(numero, help_txt)
                      return jsonify({"status": "admin_cmd_help"}), 200
@@ -290,6 +294,18 @@ https://agente-glamstore.onrender.com/admin/db
 (Desde ahí puedes ver todo el inventario actualizado al segundo)."""
                      enviar_whatsapp(numero, msg)
                      return jsonify({"status": "admin_cmd_email_redirect"}), 200
+
+                 # --- COMANDO: !modo ventas ---
+                 if "ventas" in texto and "modo" in texto:
+                     db.modo_vacaciones = False
+                     enviar_whatsapp(numero, "🟢 *¡MODO VENTAS ACTIVADO!* 💰\n✅ El bot ahora venderá y generará links de pago.\n✅ Mensajes de 'Vacaciones' desactivados.")
+                     return jsonify({"status": "admin_cmd_sales_mode"}), 200
+
+                 # --- COMANDO: !modo vacaciones ---
+                 if "vacaciones" in texto and "modo" in texto:
+                     db.modo_vacaciones = True
+                     enviar_whatsapp(numero, "🔴 *¡MODO VACACIONES ACTIVADO!* 🌴\n⛔ Ventas pausadas. El bot solo mostrará el catálogo (Modo Revista).")
+                     return jsonify({"status": "admin_cmd_vacation_mode"}), 200
 
              return jsonify({"status": "admin_cmd_ignored"}), 200
 

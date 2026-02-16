@@ -17,7 +17,7 @@ else:
     model = None
 
 # Variables Globales (Sincronizar con app.py o config central)
-MODO_VACACIONES = True
+# MODO_VACACIONES eliminado -> Usamos db.modo_vacaciones
 
 def _segmentar_precios(items: List[Dict[str, Any]]) -> str:
     """Helper para resumir precios."""
@@ -154,13 +154,16 @@ def procesar_inteligencia_artificial(
             es_saludo_puro = True
             
     # LOGICA NO-PRODUCTO
+    # Producto Foco override
+    # ...
+
     if (es_soporte or es_cierre or es_saludo_puro) and not producto_foco:
          logging.info(f"ℹ️ Detectada intención NO-PRODUCTO. Omitiendo búsqueda DB.")
          res = {"items": [], "tipo": "VACIO"}
          
          if es_soporte:
              intencion = "SOPORTE"
-             if MODO_VACACIONES:
+             if db.modo_vacaciones:
                  estado_tienda = "⛔ TIENDA CERRADA POR VACACIONES HASTA MARZO (Modo Revista)."
                  horario_txt = "⛔ CERRADO (Retomamos en Marzo)."
                  mayorista_txt = "⛔ CERRADO. Escríbenos en Marzo."
@@ -189,7 +192,7 @@ def procesar_inteligencia_artificial(
     else:
          # LOGICA PRODUCTO
          if db.total_items == 0:
-            if MODO_VACACIONES:
+            if db.modo_vacaciones:
                  enviar_whatsapp(numero, "🌴 ¡Hola! Estamos de vacaciones hasta Marzo.\nEstamos activando el *Modo Revista*... Dame 2 minutos. ⏳")
             else:
                  enviar_whatsapp(numero, "🛠️ Estoy despertando y ordenando mis productos... Dame 1 minuto. 🙏")
