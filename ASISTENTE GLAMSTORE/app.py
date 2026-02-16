@@ -55,44 +55,83 @@ def admin_db():
         status = db.get_status()
         products = db.productos # Show ALL
         html = f"""
-        <html>
+        <!DOCTYPE html>
+        <html lang="es">
         <head>
-            <title>Admin DB View</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Admin GlamStore DB</title>
+            <!-- Bootstrap 5 & DataTables CSS -->
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+            <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+            <link href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.bootstrap5.min.css" rel="stylesheet">
             <style>
-                body {{ font-family: Arial, sans-serif; padding: 20px; }}
-                table {{ border-collapse: collapse; width: 100%; }}
-                th, td {{ padding: 8px; border: 1px solid #ddd; }}
-                th {{ background-color: #f2f2f2; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .btn {{ 
-                    background-color: #4CAF50; color: white; padding: 10px 20px; 
-                    text-decoration: none; border-radius: 5px; font-weight: bold;
-                }}
+                body {{ background-color: #f8f9fa; font-family: 'Segoe UI', system-ui, sans-serif; }}
+                .container {{ max-width: 95%; margin-top: 20px; }}
+                .card {{ border: none; shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 12px; }}
+                .header-area {{ background: linear-gradient(135deg, #d53369 0%, #daae51 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0; }}
+                .btn-sync {{ background-color: rgba(255,255,255,0.2); color: white; border: 1px solid white; backdrop-filter: blur(5px); }}
+                .btn-sync:hover {{ background-color: white; color: #d53369; }}
+                table.dataTable thead th {{ background-color: #f1f1f1; }}
+                .badge-stock-low {{ background-color: #ffc107; color: #000; }}
+                .badge-stock-out {{ background-color: #dc3545; color: white; }}
+                .badge-stock-ok {{ background-color: #198754; color: white; }}
             </style>
         </head>
         <body>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h1>🛠️ Base de Datos ({len(products)} productos)</h1>
-                <a href="/admin/force_sync" class="btn">🔄 Forzar Sincronización</a>
+            <div class="container mb-5">
+                <div class="card shadow">
+                    <div class="header-area d-flex justify-content-between align-items-center">
+                        <div>
+                            <h2 class="mb-0">✨ GlamStore Inventory</h2>
+                            <small>Total: {len(products)} productos | Sync: {status.get('sync_status')}</small>
+                        </div>
+                        <a href="/admin/force_sync" class="btn btn-sync fw-bold">🔄 Forzar Sincronización</a>
+                    </div>
+                    <div class="card-body bg-white">
+                        <div class="alert alert-info py-2" role="alert">
+                            <small>ℹ️ <strong>Tips:</strong> Puedes buscar por cualquier columna. Haz clic en los encabezados para ordenar.</small>
+                        </div>
+                        
+                        <table id="productsTable" class="table table-striped table-hover dt-responsive nowrap" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Título</th>
+                                    <th>Categoría</th>
+                                    <th>Precio</th>
+                                    <th>Oferta</th>
+                                    <th>Stock</th>
+                                    <th>Tags</th>
+                                    <th>Vendor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {''.join([f"<tr><td><small class='text-muted'>{p.get('id')}</small></td><td class='fw-bold'>{p.get('title')}</td><td><span class='badge bg-secondary'>{p.get('category','')}</span></td><td>${int(float(p.get('price',0))):,}</td><td class='text-success'>{f'${int(float(p.get('compare_at_price',0))):,}' if p.get('compare_at_price') else '-'}</td><td>{p.get('stock')}</td><td><small>{p.get('tags','')[:50]}...</small></td><td><small>{p.get('vendor')}</small></td></tr>" for p in products])}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <ul>
-                <li><strong>Ultima Sincronización:</strong> {status.get('last_sync', 'Nunca')}</li>
-                <li><strong>Estado Sync:</strong> {status.get('sync_status', 'Desconocido')}</li>
-                <li><strong>Modo Vacaciones:</strong> {status.get('modo_vacaciones', False)}</li>
-            </ul>
-            <hr>
-            <table>
-                <tr>
-                    <th>ID</th>
-                    <th>Título</th>
-                    <th>Categoría</th>
-                    <th>Precio</th>
-                    <th>Oferta</th>
-                    <th>Stock</th>
-                    <th>Tags</th>
-                </tr>
-                {''.join([f"<tr><td>{p.get('id')}</td><td>{p.get('title')}</td><td>{p.get('category','')}</td><td>${int(float(p.get('price',0))):,}</td><td style='color:green;'>{f'${int(float(p.get('compare_at_price',0))):,}' if p.get('compare_at_price') else '-'}</td><td>{p.get('stock')}</td><td style='font-size:10px;'>{p.get('tags','')}</td></tr>" for p in products])}
-            </table>
+
+            <!-- Scripts -->
+            <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+            <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+            <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+            <script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
+            <script src="https://cdn.datatables.net/responsive/2.5.0/js/responsive.bootstrap5.min.js"></script>
+            <script>
+                $(document).ready(function() {{
+                    $('#productsTable').DataTable({{
+                        responsive: true,
+                        pageLength: 25,
+                        language: {{
+                            url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json'
+                        }},
+                        order: [[1, 'asc']]
+                    }});
+                }});
+            </script>
         </body>
         </html>
         """
