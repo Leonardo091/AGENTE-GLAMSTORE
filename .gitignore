@@ -27,7 +27,12 @@ MANIFEST
 venv/
 .venv/
 env/
-.env/
+# Virtual Environment
+venv/
+.venv/
+env/
+.env
+
 
 # Node
 node_modules/
