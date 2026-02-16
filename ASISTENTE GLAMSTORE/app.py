@@ -250,7 +250,7 @@ def webhook():
 
         # D) Comandos Admin (Simplified logic call)
         # (Aquí podríamos mover lógica Admin a un admin_service, pero por ahora lo dejamos simple o invocamos DB directo)
-        if texto.startswith("!db") or texto.startswith("!comandos"):
+        if texto.startswith("!db") or texto.startswith("!comandos") or texto.startswith("!modo"):
              admin_numbers = os.environ.get("ADMIN_NUMBER", "").split(",")
              es_admin = any(admin.strip() in numero for admin in admin_numbers if admin.strip())
              
