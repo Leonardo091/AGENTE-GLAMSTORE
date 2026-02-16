@@ -174,11 +174,17 @@ class GlamStoreDB:
 
     def _actualizar_tabla_maestra(self):
         self.sync_status = "Sincronizando..."
-        clean_url = self.shopify_url.replace("https://", "").replace("/", "")
-        graphql_url = f"https://{clean_url}/admin/api/2024-10/graphql.json"
+        self.sync_status = "Sincronizando..."
+        
+        # Limpieza robusta de URL
+        u = self.shopify_url or ""
+        u = u.replace("https://", "").replace("http://", "").split("/")[0].strip()
+        
+        graphql_url = f"https://{u}/admin/api/2024-10/graphql.json"
         headers = {"X-Shopify-Access-Token": self.shopify_token, "Content-Type": "application/json"}
         
-        logging.info("🔄 SQL Sync: Conectando a Shopify (GraphQL)...")
+        masked_token = (self.shopify_token[:4] + "..." + self.shopify_token[-4:]) if self.shopify_token else "NONE"
+        logging.info(f"🔄 SQL Sync: Conectando a {u} (Token: {masked_token})")
         
         conn = self._get_conn()
         cursor = conn.cursor()

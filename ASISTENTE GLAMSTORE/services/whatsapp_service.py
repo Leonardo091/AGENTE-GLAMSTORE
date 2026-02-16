@@ -107,8 +107,9 @@ def enviar_reporte_email(csv_data: str, destinatario: str = "glamstorechile2019@
     # ... (Mover lógica de email también aquí o a un servicio aparte?)
     # Por simplicidad, dejemos email aquí ya que es "salida".
     DESTINATARIO = destinatario
-    SENDER = os.environ.get("EMAIL_SENDER")
-    PASSWORD = os.environ.get("EMAIL_PASSWORD")
+    DESTINATARIO = destinatario
+    SENDER = os.environ.get("EMAIL_SENDER") or os.environ.get("SMTP_USER")
+    PASSWORD = os.environ.get("EMAIL_PASSWORD") or os.environ.get("SMTP_PASSWORD")
     
     if not SENDER or not PASSWORD:
         logging.error("Faltan credenciales de Email")
