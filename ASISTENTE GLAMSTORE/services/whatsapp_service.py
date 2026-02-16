@@ -127,8 +127,9 @@ def enviar_reporte_email(csv_data: str, destinatario: str = "glamstorechile2019@
         part['Content-Disposition'] = 'attachment; filename="inventario.csv"'
         msg.attach(part)
         
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # Usar puerto 465 (SSL) que es menos propenso a bloqueos que 587 (TLS start)
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # server.starttls() # No necesario con SMTP_SSL
         server.login(SENDER, PASSWORD)
         server.send_message(msg)
         server.quit()
