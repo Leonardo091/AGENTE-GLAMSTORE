@@ -42,9 +42,8 @@ class GlamStoreDB:
             "el", "la", "los", "las", "un", "una", "de", "del", "que", "en", "y", "o"
         }
 
-        # CONFIGURACIÓN MODO VACACIONES (Hardcoded por seguridad)
-        self.modo_vacaciones = True
-
+        # CONFIGURACIÓN MODO VACACIONES (Persistente)
+        # Se accede via property self.modo_vacaciones
 
         # 1. INICIALIZAR SQLITE
         self._init_db()
@@ -61,6 +60,41 @@ class GlamStoreDB:
             self.sync_status = "Error: Faltan Credenciales"
             logging.warning("⚠️ MODO SIN CONEXIÓN: Faltan credenciales de Shopify")
 
+    # --- CONFIGURACIÓN PERSISTENTE ---
+    def _get_config(self, key: str, default: str) -> str:
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM config WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            conn.close()
+            return row[0] if row else default
+        except:
+            return default
+
+    def _set_config(self, key: str, value: str) -> None:
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", (key, value))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logging.error(f"Error saving config: {e}")
+
+    @property
+    def modo_vacaciones(self) -> bool:
+        """Lee el estado desde la DB (compartido entre workers)."""
+        val = self._get_config("modo_vacaciones", "true") # Default True (Safety)
+        return val.lower() == "true"
+
+    @modo_vacaciones.setter
+    def modo_vacaciones(self, value: bool):
+        """Escribe el estado en la DB."""
+        str_val = "true" if value else "false"
+        self._set_config("modo_vacaciones", str_val)
+        logging.info(f"🔄 Configuración actualizada: modo_vacaciones = {str_val}")
+
     @property
     def total_items(self) -> int:
         # Auto-heal: Si un worker tiene memoria vacía pero la DB tiene datos
@@ -76,6 +110,8 @@ class GlamStoreDB:
         """Crea la tabla si no existe."""
         conn = self._get_conn()
         cursor = conn.cursor()
+        
+        # Tabla Productos
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS productos (
                 id INTEGER PRIMARY KEY,
@@ -92,6 +128,14 @@ class GlamStoreDB:
                 search_text TEXT,
                 variant_id INTEGER,
                 updated_at TIMESTAMP
+            )
+        ''')
+
+        # Tabla Configuración (Nueva)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT
             )
         ''')
         
