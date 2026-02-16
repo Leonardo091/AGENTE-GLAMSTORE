@@ -66,20 +66,24 @@ def admin_db():
             <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
             <link href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.bootstrap5.min.css" rel="stylesheet">
             <style>
-                body {{ background-color: #f8f9fa; font-family: 'Segoe UI', system-ui, sans-serif; }}
-                .container {{ max-width: 95%; margin-top: 20px; }}
+                body {{ background-color: #f8f9fa; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 0.9rem; }}
+                .container-fluid {{ max-width: 98%; margin-top: 20px; }}
                 .card {{ border: none; shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 12px; }}
-                .header-area {{ background: linear-gradient(135deg, #d53369 0%, #daae51 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0; }}
-                .btn-sync {{ background-color: rgba(255,255,255,0.2); color: white; border: 1px solid white; backdrop-filter: blur(5px); }}
+                .header-area {{ background: linear-gradient(135deg, #d53369 0%, #daae51 100%); color: white; padding: 15px; border-radius: 12px 12px 0 0; }}
+                .btn-sync {{ background-color: rgba(255,255,255,0.2); color: white; border: 1px solid white; backdrop-filter: blur(5px); padding: 5px 15px; font-size: 0.9rem; }}
                 .btn-sync:hover {{ background-color: white; color: #d53369; }}
-                table.dataTable thead th {{ background-color: #f1f1f1; }}
+                table.dataTable thead th {{ background-color: #f1f1f1; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }}
+                table.dataTable tbody td {{ vertical-align: middle; }}
+                .badge-stock-low {{ background-color: #ffc107; color: #000; }}
+                .badge-stock-out {{ background-color: #dc3545; color: white; }}
+                .badge-stock-ok {{ background-color: #198754; color: white; }}
                 .badge-stock-low {{ background-color: #ffc107; color: #000; }}
                 .badge-stock-out {{ background-color: #dc3545; color: white; }}
                 .badge-stock-ok {{ background-color: #198754; color: white; }}
             </style>
         </head>
         <body>
-            <div class="container mb-5">
+            <div class="container-fluid mb-5">
                 <div class="card shadow">
                     <div class="header-area d-flex justify-content-between align-items-center">
                         <div>
