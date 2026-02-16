@@ -27,8 +27,9 @@ class GlamStoreDB:
         self.last_sync = None
         self.sync_status = "Iniciada"
         self.sync_error = None
-        self.shopify_token = os.environ.get("SHOPIFY_TOKEN")
-        self.shopify_url = os.environ.get("SHOPIFY_URL")
+        # Usar nombres consistentes con .env
+        self.shopify_token = os.environ.get("SHOPIFY_ADMIN_API_TOKEN") or os.environ.get("SHOPIFY_TOKEN")
+        self.shopify_url = os.environ.get("SHOPIFY_SHOP_DOMAIN") or os.environ.get("SHOPIFY_URL")
         
         # Palabras excluidas en búsquedas
         self.palabras_basura: Set[str] = {
