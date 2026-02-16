@@ -253,11 +253,11 @@ def procesar_inteligencia_artificial(
         # MODO VACACIONES LOGIC
         keywords_compra = ["comprar este", "llevo esto", "generame el link", "dame el link", "link de pago", "pagar ahora"]
         
-        if MODO_VACACIONES:
+        if db.modo_vacaciones:
              contexto_data = "⚠️ AVISO IMPORTANTE: ESTAMOS DE VACACIONES HASTA MARZO.\n" + contexto_data
              contexto_data += "\n\nINSTRUCCION CLAVE: Si quiere comprar, di AMABLEMENTE que estamos en 'Modo Revista' y que volvemos en Marzo."
 
-        if intencion == "CHECKOUT_INTENT" and MODO_VACACIONES:
+        if intencion == "CHECKOUT_INTENT" and db.modo_vacaciones:
              enviar_whatsapp(numero, "🌴 ¡Hola! Estamos de vacaciones hasta Marzo.\nEl sitio funciona en *Modo Revista*: ventas pausadas. ✨")
              return
 
