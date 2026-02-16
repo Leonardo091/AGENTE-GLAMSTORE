@@ -206,12 +206,47 @@ def webhook():
 
         # D) Comandos Admin (Simplified logic call)
         # (Aquí podríamos mover lógica Admin a un admin_service, pero por ahora lo dejamos simple o invocamos DB directo)
-        if texto.startswith("!db") and os.environ.get("ADMIN_NUMBER") in numero:
-             # ... Logic admin rapida ...
-             if "sync" in texto:
-                 threading.Thread(target=db.force_sync).start()
-                 enviar_whatsapp(numero, "⏳ Sync Background Iniciada.")
-             return jsonify({"status": "admin_cmd"}), 200
+        if texto.startswith("!db") or texto.startswith("!comandos"):
+             if os.environ.get("ADMIN_NUMBER") in numero:
+                 # --- COMANDO: !comandos ---
+                 if "!comandos" in texto:
+                     help_txt = """🛠️ *Panel de Admin GlamStore* 🛠️
+
+1. *!db sync*
+   🔄 Fuerza actualización inmediata con Shopify.
+2. *!db email [correo]*
+   📧 Envía la BDD completa en CSV a tu correo.
+   (Si no pones correo, usa el por defecto).
+3. *!comandos*
+   📜 Muestra esta lista.
+"""
+                     enviar_whatsapp(numero, help_txt)
+                     return jsonify({"status": "admin_cmd_help"}), 200
+
+                 # --- COMANDO: !db sync ---
+                 if "sync" in texto:
+                     threading.Thread(target=db.force_sync).start()
+                     enviar_whatsapp(numero, "⏳ *Sync Iniciado...* \n(Te avisaré si hay errores en el log, si no, asume éxito en 1 min).")
+                     return jsonify({"status": "admin_cmd_sync"}), 200
+
+                 # --- COMANDO: !db email ---
+                 if "email" in texto:
+                     parts = texto.split()
+                     target_email = parts[2] if len(parts) > 2 else "leonardo09112001@gmail.com" # Default al del admin
+                     
+                     def _send_async():
+                         csv_str = db.exportar_csv_str()
+                         ok = enviar_reporte_email(csv_str, target_email)
+                         if ok:
+                             enviar_whatsapp(numero, f"✅ Base de datos enviada a: {target_email}")
+                         else:
+                             enviar_whatsapp(numero, "❌ Error enviando email. Revisa logs.")
+
+                     threading.Thread(target=_send_async).start()
+                     enviar_whatsapp(numero, "📧 Generando y enviando reporte...")
+                     return jsonify({"status": "admin_cmd_email"}), 200
+
+             return jsonify({"status": "admin_cmd_ignored"}), 200
 
         # E) Gestión Memoria Usuario
         if numero not in MEMORIA_USUARIOS:

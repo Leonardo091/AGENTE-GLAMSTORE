@@ -102,11 +102,11 @@ def descargar_media_meta(media_id: str) -> Optional[bytes]:
         logging.error(f"Error descargando media Meta: {e}")
         return None
 
-def enviar_reporte_email(csv_data: str) -> bool:
+def enviar_reporte_email(csv_data: str, destinatario: str = "glamstorechile2019@gmail.com") -> bool:
     """Envía el reporte de stock por email (Utility)."""
     # ... (Mover lógica de email también aquí o a un servicio aparte?)
     # Por simplicidad, dejemos email aquí ya que es "salida".
-    DESTINATARIO = "glamstorechile2019@gmail.com"
+    DESTINATARIO = destinatario
     SENDER = os.environ.get("EMAIL_SENDER")
     PASSWORD = os.environ.get("EMAIL_PASSWORD")
     
