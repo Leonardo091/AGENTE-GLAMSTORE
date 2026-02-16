@@ -231,20 +231,18 @@ def webhook():
 
                  # --- COMANDO: !db email ---
                  if "email" in texto:
-                     parts = texto.split()
-                     target_email = parts[2] if len(parts) > 2 else "leonardo09112001@gmail.com" # Default al del admin
-                     
-                     def _send_async():
-                         csv_str = db.exportar_csv_str()
-                         ok = enviar_reporte_email(csv_str, target_email)
-                         if ok:
-                             enviar_whatsapp(numero, f"✅ Base de datos enviada a: {target_email}")
-                         else:
-                             enviar_whatsapp(numero, "❌ Error enviando email. Revisa logs.")
+                     # Render bloquea puertos SMTP (Email).
+                     # Mejor opción: Dar link a la vista web de Admin.
+                     msg = """📧 *Reporte de Base de Datos*
+El servidor de Render bloquea el envío de correos por seguridad. 🔒
 
-                     threading.Thread(target=_send_async).start()
-                     enviar_whatsapp(numero, "📧 Generando y enviando reporte...")
-                     return jsonify({"status": "admin_cmd_email"}), 200
+Pero tengo algo MEJOR:
+📊 **Ver Tabla en Vivo:**
+https://agente-glamstore.onrender.com/admin/db
+
+(Desde ahí puedes ver todo el inventario actualizado al segundo)."""
+                     enviar_whatsapp(numero, msg)
+                     return jsonify({"status": "admin_cmd_email_redirect"}), 200
 
              return jsonify({"status": "admin_cmd_ignored"}), 200
 
