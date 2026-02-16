@@ -52,8 +52,9 @@ def debug_search():
 @app.route("/admin/db")
 def admin_db():
     try:
+        # Forzar lectura de disco para evitar consistencia eventual entre workers
+        products = db.get_productos_frescos()
         status = db.get_status()
-        products = db.productos # Show ALL
         html = f"""
         <!DOCTYPE html>
         <html lang="es">

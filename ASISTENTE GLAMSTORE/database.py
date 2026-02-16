@@ -134,7 +134,13 @@ class GlamStoreDB:
             conn.close()
         except Exception as e:
             logging.error(f"Error cargando desde SQL: {e}")
+        except Exception as e:
+            logging.error(f"Error cargando desde SQL: {e}")
 
+    def get_productos_frescos(self) -> List[Dict[str, Any]]:
+        """Fuerza una lectura desde SQL para asegurar datos frescos entre workers."""
+        self._cargar_memoria_desde_sql()
+        return self.productos
     def get_status(self) -> Dict[str, Any]:
         return {
 
