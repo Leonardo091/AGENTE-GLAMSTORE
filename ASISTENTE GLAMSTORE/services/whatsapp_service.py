@@ -44,7 +44,7 @@ def check_rate_limit(numero: str) -> bool:
 
 # --- WHATSAPP API ---
 
-def enviar_whatsapp(numero: str, texto: str, url_media: Optional[str] = None) -> bool:
+def enviar_whatsapp(numero: str, texto: str, url_media: Optional[str] = None) -> Optional[str]:
     """Envía mensaje a WhatsApp Cloud API (Texto o Imagen)."""
     try:
         phone_id = os.environ.get("META_PHONE_ID")
@@ -68,12 +68,17 @@ def enviar_whatsapp(numero: str, texto: str, url_media: Optional[str] = None) ->
             
         r = requests.post(url, headers=headers, json=payload)
         
+        r = requests.post(url, headers=headers, json=payload)
+        
         if r.status_code in [200, 201]:
             logging.info(f"📤 Respuesta enviada a {numero}")
-            return True
+            try:
+                return r.json()["messages"][0]["id"]
+            except:
+                return "ID_NOT_FOUND"
         else:
             logging.error(f"❌ Error enviando WhatsApp: {r.text}")
-            return False
+            return None
             
     except Exception as e:
         logging.error(f"Error crítico enviando WhatsApp: {e}")

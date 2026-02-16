@@ -222,13 +222,24 @@ def procesar_inteligencia_artificial(
          
          # Omitimos logica 'sinonimos' detallada para no duplicar demasiado código, pero base busca bien.
 
-    # Producto Foco override
-    if producto_foco:
-        keywords_referencia = ["este", "ese", "quiero", "llevo", "dame", "precio", "cuanto", "comprar"]
-        if any(k in texto.lower() for k in keywords_referencia):
-            res["items"] = [producto_foco]
-            res["tipo"] = "EXACTO"
-            usuario['contexto_productos'] = [producto_foco]
+    # Producto Foco override (Quote o Fallback Contextual)
+    keywords_referencia = ["este", "ese", "quiero", "llevo", "dame", "precio", "cuanto", "comprar"]
+    es_referencia = any(k in texto.lower() for k in keywords_referencia)
+
+    if producto_foco and es_referencia:
+        res["items"] = [producto_foco]
+        res["tipo"] = "EXACTO"
+        usuario['contexto_productos'] = [producto_foco]
+        
+    elif es_referencia and not producto_foco:
+        # Fallback: Si dice "quiero este" pero no citó mensaje, usar el último mostrado
+        if 'contexto_productos' in usuario and usuario['contexto_productos']:
+             # Usamos el primero de la lista anterior (el más relevante)
+             p_fallback = usuario['contexto_productos'][0]
+             res["items"] = [p_fallback]
+             res["tipo"] = "EXACTO"
+             producto_foco = p_fallback # Para que el prompt sepa de qué hablamos
+             logging.info(f"📍 Contexto Fallback: Asumiendo '{p_fallback['title']}' por referencia '{texto}'")
 
     # PROCESAMIENTO RESULTADOS
     if res["tipo"] != "VACIO":
@@ -330,7 +341,9 @@ def procesar_inteligencia_artificial(
                     precio_fmt = f"${int(p.get('price',0)):,}"
                     caption = f"{p['title']}\n💰 {precio_fmt}"
                     
-                    enviar_whatsapp(numero, caption, url_img)
+                    msg_id = enviar_whatsapp(numero, caption, url_img)
+                    if msg_id and msg_id != "ID_NOT_FOUND":
+                        usuario['msg_map'][msg_id] = p
                     img_count += 1
                     time.sleep(1) # Rate limit suave
     except Exception as e:
