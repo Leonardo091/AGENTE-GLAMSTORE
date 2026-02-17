@@ -103,12 +103,18 @@ class GlamStoreDB:
         return len(self.productos)
 
     def _get_conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, check_same_thread=False)
+        # Timeout 30s para evitar bloqueos en writes concurrentes
+        return sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
 
     def _init_db(self) -> None:
 
         """Crea la tabla si no existe."""
         conn = self._get_conn()
+        try:
+            # WAL Mode para concurrencia (Permite readers mientras writer trabaja)
+            conn.execute("PRAGMA journal_mode=WAL;")
+        except:
+            pass
         cursor = conn.cursor()
         
         # Tabla Productos
