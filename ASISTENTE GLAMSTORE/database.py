@@ -169,19 +169,37 @@ class GlamStoreDB:
         Si no, lo marca como procesado y retorna False.
         """
         if not message_id: return True # Ignorar vacios
-        try:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            # Intentar insertar. Si falla (ya existe), es duplicado.
-            cursor.execute("INSERT INTO processed_messages (message_id) VALUES (?)", (message_id,))
-            conn.commit()
-            conn.close()
-            return False # No estaba, ahora sí. Procesar.
-        except sqlite3.IntegrityError:
-            return True # Ya estaba. Ignorar.
-        except Exception as e:
-            logging.error(f"Error deduplicacion DB: {e}")
-            return False # Ante la duda, procesar (mejor doble respuesta que ninguna)
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                conn = self._get_conn()
+                cursor = conn.cursor()
+                # Intentar insertar. Si falla (ya existe), es duplicado.
+                cursor.execute("INSERT INTO processed_messages (message_id) VALUES (?)", (message_id,))
+                conn.commit()
+                conn.close()
+                logging.info(f"✨ New Msg ID: {message_id} (Processed)")
+                return False # No estaba, ahora sí. Procesar.
+            except sqlite3.IntegrityError:
+                logging.info(f"🚫 Duplicate Msg ID: {message_id} (Ignored)")
+                try: conn.close()
+                except: pass
+                return True # Ya estaba. Ignorar.
+            except sqlite3.OperationalError as e:
+                # Locked? Retry
+                logging.warning(f"⚠️ DB Locked check_msg_id (Attempt {attempt+1}/{max_retries}): {e}")
+                time.sleep(0.2)
+                try: conn.close()
+                except: pass
+            except Exception as e:
+                logging.error(f"❌ Error deduplicacion DB: {e}")
+                try: conn.close()
+                except: pass
+                return False # Fallback: procesar
+        
+        logging.error(f"❌ DB Locked permanently for Msg ID {message_id}. Dropping to avoid spam.")
+        return True # Fail-closed (Assume duplicate to avoid spam in worst case)
         try:
             cursor.execute("SELECT compare_at_price FROM productos LIMIT 1")
         except sqlite3.OperationalError:
