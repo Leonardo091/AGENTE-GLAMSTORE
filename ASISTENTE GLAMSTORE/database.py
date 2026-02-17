@@ -514,6 +514,22 @@ class GlamStoreDB:
         precios_encontrados = [int(n) for n in re.findall(r'\b\d{3,7}\b', texto_usuario) if 1000 <= int(n) <= 1000000]
         precio_objetivo = precios_encontrados[0] if precios_encontrados else None
         
+        # Estrategia 0: VENDOR MATCH (Prioridad Absoluta)
+        # Si el usuario menciona una marca exacta (ej: "Maison Alhambra", "Lattafa")
+        for p in self.productos:
+            vendor = self._normalizar(p['vendor'])
+            if vendor and len(vendor) > 3 and vendor in texto_limpio:
+                # MATCH DE MARCA DETECTADO
+                candidatos_vendor = [prod for prod in self.productos if self._normalizar(prod['vendor']) == vendor]
+                
+                # Filtro Precio opcional
+                if precio_objetivo:
+                     candidatos_precio = [prod for prod in candidatos_vendor if int(prod['price']) == precio_objetivo]
+                     if candidatos_precio: candidatos_vendor = candidatos_precio
+
+                import random
+                return {"tipo": "EXACTO", "items": random.sample(candidatos_vendor, min(5, len(candidatos_vendor)))}
+
         # Estrategia 1: Categoría
         for cat, sins in categorias_map.items():
             if any(s in texto_limpio for s in sins):

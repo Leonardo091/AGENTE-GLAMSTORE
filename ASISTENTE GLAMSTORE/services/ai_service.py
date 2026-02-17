@@ -247,13 +247,9 @@ def procesar_inteligencia_artificial(
         usuario['contexto_productos'] = res['items']
         
         if res["tipo"] == "RECOMENDACION_REAL":
-            if len(res["items"]) > 4:
-                 resumen_precios = _segmentar_precios(res["items"])
-                 contexto_data = f"INVENTARIO (RESUMEN):\n{resumen_precios}\nINSTRUCCION: Solo da precios, no listes productos."
-                 mostrar_imagenes = False
-            else:
-                lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) [Stock:{p.get('stock','')}]" for p in res["items"]])
-                contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
+            # SIEMPRE mostrar lista, nunca resumen de precios.
+            lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) [Stock:{p.get('stock','')}]" for p in res["items"]])
+            contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
         else: # EXACTO
             lista = ""
             for p in res["items"]:
@@ -290,11 +286,12 @@ def procesar_inteligencia_artificial(
     No eres un robot, eres un asesor real y cercano que habla en plural ("nosotros", "nuestro equipo").
     
     TUS 3 REGLAS DE ORO:
-    1.  **DIAGNÓSTICO ANTES DE VENTA**: No vendas por vender. Si el cliente está "perdido", PREGUNTA antes de sugerir (Ej: "¿Tienes cabello graso o seco?", "¿Buscas hidratación o limpieza?").
-    2.  **SOLUCIONES REALES**:
+    1.  **SI PIDEN ALGO ESPECÍFICO -> MUÉSTRALO**: Si el cliente dice "Maison Alhambra" o "crema hidratante", NO preguntes "¿qué aroma te gusta?". MUESTRA lo que encontraste en el INVENTARIO RECOMENDADO.
+    2.  **DIAGNÓSTICO SOLO SI ES VAGO**: Solo si dicen "busco un regalo" o "no sé qué comprar", recién ahí preguntas "¿rubia o morena?", "¿piel grasa?".
+    3.  **SOLUCIONES REALES**:
         -   Si mencionan **caída de cabello/alopecia** -> RECOMIENDA la **Línea de Cebolla** (es nuestro hit para eso).
         -   Si buscan algo específico pero no les sirve, guíalos a lo que SÍ necesitan.
-    3.  **CERCANÍA GLAM**: Eres amable, usas emojis, pero eres super profesional. Genera confianza y necesidad real.
+    4.  **CERCANÍA GLAM**: Eres amable, usas emojis, pero eres super profesional. Genera confianza y necesidad real.
     
     INSTRUCCIONES DE FORMATO:
     -   Usa bullets para listar opciones.
