@@ -26,7 +26,7 @@ app = Flask(__name__)
 VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "glamstore_verify_token")
 
 # --- MEMORIA ESTADO ---
-processed_message_ids = deque(maxlen=100)
+# processed_message_ids = deque(maxlen=100) # Deprecated by DB
 MEMORIA_USUARIOS = {}
 
 # --- RUTAS DE MANTENIMIENTO ---
@@ -222,11 +222,11 @@ def webhook():
             logging.warning(f"⛔ Rate Limit {numero}")
             return jsonify({"status": "rate_limited"}), 200
         
-        # B) Deduplicación
+        # B) Deduplicación (Persistente en DB)
         message_id = msg.get("id")
-        if message_id and message_id in processed_message_ids:
+        if message_id and db.check_message_id(message_id):
+            logging.info(f"🔁 Mensaje duplicado ignorado: {message_id}")
             return jsonify({"status": "ignored_duplicate"}), 200
-        if message_id: processed_message_ids.append(message_id)
 
         # C) Extracción Info
         msg_type = msg.get("type")
