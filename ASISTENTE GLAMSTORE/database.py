@@ -131,15 +131,51 @@ class GlamStoreDB:
             )
         ''')
 
-        # Tabla Configuración (Nueva)
+        # Tabla Configuración
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS config (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         ''')
+
+        # Tabla Deduplicación (Nueva)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS processed_messages (
+                message_id TEXT PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         # Migración simple: Check if column exists
+        try:
+            cursor.execute("SELECT compare_at_price FROM productos LIMIT 1")
+        except sqlite3.OperationalError:
+            logging.info("🔧 Migración: Agregando columna 'compare_at_price'...")
+            cursor.execute("ALTER TABLE productos ADD COLUMN compare_at_price REAL")
+
+        conn.commit()
+        conn.close()
+
+    def check_message_id(self, message_id: str) -> bool:
+        """
+        Retorna True si el mensaje YA fue procesado.
+        Si no, lo marca como procesado y retorna False.
+        """
+        if not message_id: return True # Ignorar vacios
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            # Intentar insertar. Si falla (ya existe), es duplicado.
+            cursor.execute("INSERT INTO processed_messages (message_id) VALUES (?)", (message_id,))
+            conn.commit()
+            conn.close()
+            return False # No estaba, ahora sí. Procesar.
+        except sqlite3.IntegrityError:
+            return True # Ya estaba. Ignorar.
+        except Exception as e:
+            logging.error(f"Error deduplicacion DB: {e}")
+            return False # Ante la duda, procesar (mejor doble respuesta que ninguna)
         try:
             cursor.execute("SELECT compare_at_price FROM productos LIMIT 1")
         except sqlite3.OperationalError:
