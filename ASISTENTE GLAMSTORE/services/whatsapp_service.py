@@ -68,8 +68,6 @@ def enviar_whatsapp(numero: str, texto: str, url_media: Optional[str] = None) ->
             
         r = requests.post(url, headers=headers, json=payload)
         
-        r = requests.post(url, headers=headers, json=payload)
-        
         if r.status_code in [200, 201]:
             logging.info(f"📤 Respuesta enviada a {numero}")
             try:
