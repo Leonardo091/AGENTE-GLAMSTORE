@@ -198,8 +198,8 @@ class GlamStoreDB:
                 except: pass
                 return False # Fallback: procesar
         
-        logging.error(f"❌ DB Locked permanently for Msg ID {message_id}. Dropping to avoid spam.")
-        return True # Fail-closed (Assume duplicate to avoid spam in worst case)
+        logging.error(f"❌ DB Locked permanently for Msg ID {message_id}. Processing anyway to avoid ghosting.")
+        return False # Fail-open: Procesar mensaje aunque no se pudo registrar (riesgo de duplicado < riesgo de ignorar)
         try:
             cursor.execute("SELECT compare_at_price FROM productos LIMIT 1")
         except sqlite3.OperationalError:
