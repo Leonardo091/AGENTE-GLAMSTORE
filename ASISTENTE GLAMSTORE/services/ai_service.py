@@ -248,13 +248,13 @@ def procesar_inteligencia_artificial(
         
         if res["tipo"] == "RECOMENDACION_REAL":
             # SIEMPRE mostrar lista, nunca resumen de precios.
-            lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) [Stock:{p.get('stock','')}]" for p in res["items"]])
+            lista = "\n".join([f"- {p['title']} (${p['price']:,.0f}) [Stock:{p.get('stock','')}] [ID_V:{p.get('variant_id','?')}]" for p in res["items"]])
             contexto_data = f"INVENTARIO RECOMENDADO:\n{lista}"
         else: # EXACTO
             lista = ""
             for p in res["items"]:
                 desc_corta = p.get('body_html', '')[:100] + "..."
-                lista += f"- {p['title']} (${p['price']:,.0f})\n  📝 {desc_corta}\n"
+                lista += f"- {p['title']} (${p['price']:,.0f}) [ID_V:{p.get('variant_id','?')}]\n  📝 {desc_corta}\n"
             contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
         # MODO VACACIONES LOGIC
@@ -305,9 +305,10 @@ def procesar_inteligencia_artificial(
     else:
         target_prompt += """
         -   SI EL CLIENTE PIDE LINK DE PAGO O COMPRAR:
-            1. Confirma el total.
-            2. Genera un link SIMULADO con formato: `https://glamstore.cl/checkout/recuperar-carrito/${numero}` (Esto es un ejemplo, úsalo tal cual por ahora).
-            3. Diles que hagan click ahí para finalizar.
+            1. Identifica el ID_V (Variant ID) de cada producto que quiere.
+            2. Genera un LINK REAL de Shopify con formato: `https://glamstore-chile.myshopify.com/cart/{ID_V}:{CANTIDAD},{ID_V2}:{CANTIDAD2}`.
+               - Ejemplo: Si quiere 2 del ID_V 12345 y 1 del ID_V 67890 -> `https://glamstore-chile.myshopify.com/cart/12345:2,67890:1`
+            3. Si no tienes el ID_V, usa el ID normal pero advierte que es un link aproximado.
         """
 
     target_prompt += f"""
