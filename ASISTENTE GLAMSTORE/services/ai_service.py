@@ -258,7 +258,7 @@ def procesar_inteligencia_artificial(
             contexto_data = f"PRODUCTO ENCONTRADO:\n{lista}"
 
         # MODO VACACIONES LOGIC
-        keywords_compra = ["comprar este", "llevo esto", "generame el link", "dame el link", "link de pago", "pagar ahora"]
+        keywords_compra = ["comprar", "llevo", "generame el link", "dame el link", "link de pago", "pagar", "cuenta", "transferencia", "tarjeta"]
         
         if db.modo_vacaciones:
              contexto_data = "⚠️ AVISO IMPORTANTE: ESTAMOS DE VACACIONES HASTA MARZO.\n" + contexto_data
@@ -310,7 +310,7 @@ def procesar_inteligencia_artificial(
             3. Diles que hagan click ahí para finalizar.
         """
 
-    target_prompt += """
+    target_prompt += f"""
     
     CONTEXTO DEL INVENTARIO:
     {contexto_data}
