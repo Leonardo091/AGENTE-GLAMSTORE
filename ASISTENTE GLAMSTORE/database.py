@@ -566,10 +566,26 @@ class GlamStoreDB:
         keywords = [w for w in palabras if w not in self.palabras_basura and len(w) > 2]
         if keywords:
             resultados = []
+            
+            # Generar bigramas del usuario (ej: "salvo elixir")
+            bigramas_usuario = []
+            if len(keywords) > 1:
+                for i in range(len(keywords)-1):
+                    bigramas_usuario.append(f"{keywords[i]} {keywords[i+1]}")
+
             for p in self.productos:
                 score = 0
+                search_text = p['search_text'] # Ya está normalizado
+
+                # 1. Match de Keywords individuales
                 for kw in keywords:
-                    if kw in p['search_text']: score += 1
+                    if kw in search_text: score += 1
+                
+                # 2. Match de Frase Exacta / Bigramas (BOOST FUERTE)
+                # Si el usuario escribió "salvo elixir" y el producto lo tiene junto, priorizar.
+                for bigrama in bigramas_usuario:
+                    if bigrama in search_text:
+                        score += 10 # Jackpot logic: Si matchea 2 palabras juntas, es muy probable que sea lo que busca.
                 
                 # Boost por precio si está presente
                 if precio_objetivo and int(p['price']) == precio_objetivo:
