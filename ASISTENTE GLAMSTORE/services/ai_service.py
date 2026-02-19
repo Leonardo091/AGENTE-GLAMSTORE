@@ -306,8 +306,8 @@ def procesar_inteligencia_artificial(
         target_prompt += """
         -   SI EL CLIENTE PIDE LINK DE PAGO O COMPRAR:
             1. Identifica el ID_V (Variant ID) de cada producto que quiere.
-            2. Genera un LINK REAL de Shopify con formato: `https://glamstore-chile.myshopify.com/cart/{ID_V}:{CANTIDAD},{ID_V2}:{CANTIDAD2}`.
-               - Ejemplo: Si quiere 2 del ID_V 12345 y 1 del ID_V 67890 -> `https://glamstore-chile.myshopify.com/cart/12345:2,67890:1`
+            2. Genera un LINK REAL de Shopify con formato: `https://fj1atq-bw.myshopify.com/cart/{ID_V}:{CANTIDAD},{ID_V2}:{CANTIDAD2}`.
+               - Ejemplo: Si quiere 2 del ID_V 12345 y 1 del ID_V 67890 -> `https://fj1atq-bw.myshopify.com/cart/12345:2,67890:1`
             3. Si no tienes el ID_V, usa el ID normal pero advierte que es un link aproximado.
         """
 
