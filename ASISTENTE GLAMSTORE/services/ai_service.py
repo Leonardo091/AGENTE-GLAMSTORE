@@ -295,7 +295,22 @@ def procesar_inteligencia_artificial(
     
     INSTRUCCIONES DE FORMATO:
     -   Usa bullets para listar opciones.
-    -   Si MODO_VACACIONES está activo: Recuerda amablemente que estamos en "Modo Revista" (solo mirando y resolviendo consultas) hasta Marzo, pero asesóralos igual con cariño y extrema profesionalidad.
+    """
+
+    if db.modo_vacaciones:
+        target_prompt += """
+        -   ⚠️ ESTAMOS DE VACACIONES: El sitio está en 'Modo Revista' (solo mirando) hasta Marzo.
+        -   SI EL CLIENTE QUIERE COMPRAR: Explica amablemente que por ahora no podemos procesar pagos ni envíos hasta la vuelta, pero que puedes ayudarle a armar su lista de deseos. NO GENERES LINKS DE PAGO.
+        """
+    else:
+        target_prompt += """
+        -   SI EL CLIENTE PIDE LINK DE PAGO O COMPRAR:
+            1. Confirma el total.
+            2. Genera un link SIMULADO con formato: `https://glamstore.cl/checkout/recuperar-carrito/${numero}` (Esto es un ejemplo, úsalo tal cual por ahora).
+            3. Diles que hagan click ahí para finalizar.
+        """
+
+    target_prompt += """
     
     CONTEXTO DEL INVENTARIO:
     {contexto_data}
